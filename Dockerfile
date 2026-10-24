@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY wsgi.py .
 
-RUN useradd --system --no-create-home jobmail
+RUN useradd --system --create-home jobmail
 USER jobmail
 
 EXPOSE 8000

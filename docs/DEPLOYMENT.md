@@ -47,7 +47,7 @@ JobMail creates its tables automatically on first start.
 | `DATABASE_URL` | Neon connection string from step 3 |
 | `BASE_URL` | `<your-url>` with no trailing slash. If you do not know it yet, use `https://jobmail.onrender.com`; if Render gives a different name, change this later (step 8) |
 | `ALLOWED_EMAIL` | your Gmail address |
-| `TOKEN_ENCRYPTION_KEY` | generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `TOKEN_ENCRYPTION_KEY` | any random string of 24+ characters (e.g. from a password manager), or a Fernet key from `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from step 5 (enter placeholders now, update after) |
 | `SECRET_KEY` | generated automatically |
 
