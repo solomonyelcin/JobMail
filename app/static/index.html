@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobMail</title>
+  <meta name="theme-color" content="#1f3a5f">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>JobMail</h1>
+    <div id="userbar" class="userbar hidden">
+      <span id="syncinfo" class="muted"></span>
+      <button id="syncBtn" class="primary">Sync Gmail</button>
+      <button id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="login" class="card center hidden">
+      <h2>Track your job search from Gmail</h2>
+      <p class="muted">JobMail reads your mailbox (read-only) and keeps only job-related emails: applications, interviews, offers, rejections and openings.</p>
+      <p id="loginError" class="error hidden"></p>
+      <a class="button primary" href="/auth/login">Sign in with Google</a>
+    </section>
+
+    <section id="app" class="hidden">
+      <div id="stats" class="stats"></div>
+      <p id="syncMsg" class="muted"></p>
+
+      <nav class="tabs">
+        <button id="tabApps" class="tab active">Applications</button>
+        <button id="tabEmails" class="tab">Emails</button>
+      </nav>
+
+      <div id="appsView">
+        <div class="filters">
+          <input id="appQ" type="search" placeholder="Search company, role, notes">
+          <select id="appStatus"><option value="">All statuses</option></select>
+          <button id="addBtn">+ Add</button>
+        </div>
+        <div id="appList" class="list"></div>
+      </div>
+
+      <div id="emailsView" class="hidden">
+        <div class="filters">
+          <input id="emailQ" type="search" placeholder="Search subject, sender, text">
+          <select id="emailCat"><option value="">All categories</option></select>
+          <select id="emailStatus"><option value="">Any application status</option></select>
+          <input id="emailFrom" type="date" aria-label="From date">
+          <input id="emailTo" type="date" aria-label="To date">
+        </div>
+        <div id="emailList" class="list"></div>
+        <button id="moreBtn" class="hidden">Load more</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="dlg">
+    <form id="dlgForm" method="dialog">
+      <h3 id="dlgTitle">Application</h3>
+      <label>Company <input id="fCompany" required maxlength="100"></label>
+      <label>Role <input id="fRole" maxlength="100"></label>
+      <label>Status <select id="fStatus"></select></label>
+      <label>Notes <textarea id="fNotes" rows="4" maxlength="2000"></textarea></label>
+      <p id="dlgError" class="error hidden"></p>
+      <div class="row">
+        <button type="button" id="dlgDelete" class="danger hidden">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="dlgCancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

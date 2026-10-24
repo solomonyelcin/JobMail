@@ -1,0 +1,56 @@
+:root {
+  --bg: #f4f6f9; --card: #fff; --ink: #1c2430; --muted: #6a7686; --line: #dde2ea;
+  --brand: #1f3a5f; --accent: #2f6fed;
+  --applied: #2f6fed; --assessment: #8a5cf6; --interview: #d98a00; --offer: #1c9c5b;
+  --rejected: #c0392b; --opening: #5b6b7f; --saved: #7f8c9b; --withdrawn: #7f8c9b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.error { color: var(--rejected); }
+.top { background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+.top h1 { margin: 0; font-size: 20px; }
+.userbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.userbar .muted { color: #c5d2e6; font-size: 13px; }
+main { max-width: 980px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+.center { text-align: center; max-width: 520px; margin: 40px auto; }
+button, .button, input, select, textarea { font: inherit; }
+button, .button { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 8px; padding: 8px 12px; cursor: pointer; text-decoration: none; display: inline-block; }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--rejected); border-color: var(--rejected); }
+button:disabled { opacity: .6; cursor: default; }
+input, select, textarea { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink); max-width: 100%; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; border-top: 4px solid var(--line); }
+.stat b { display: block; font-size: 22px; }
+.stat span { font-size: 12px; color: var(--muted); text-transform: capitalize; }
+.tabs { display: flex; gap: 6px; margin: 12px 0; }
+.tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.filters input[type=search] { flex: 1 1 220px; }
+.list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.item { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.item .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.item h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.item .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; color: #fff; text-transform: capitalize; background: var(--muted); }
+.badge.applied { background: var(--applied); } .badge.assessment { background: var(--assessment); }
+.badge.interview { background: var(--interview); } .badge.offer { background: var(--offer); }
+.badge.rejected { background: var(--rejected); } .badge.opening { background: var(--opening); }
+.badge.saved, .badge.withdrawn { background: var(--saved); }
+.stat.applied { border-top-color: var(--applied); } .stat.assessment { border-top-color: var(--assessment); }
+.stat.interview { border-top-color: var(--interview); } .stat.offer { border-top-color: var(--offer); }
+.stat.rejected { border-top-color: var(--rejected); }
+.item .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.item .actions select { padding: 5px 8px; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 8px; font-size: 14px; background: #f7f9fc; padding: 10px; border-radius: 8px; max-height: 360px; overflow: auto; }
+.email-head { cursor: pointer; }
+dialog { border: 1px solid var(--line); border-radius: 12px; padding: 18px; width: min(460px, 94vw); }
+dialog::backdrop { background: rgba(0, 0, 0, .35); }
+dialog label { display: block; margin: 10px 0; font-size: 13px; color: var(--muted); }
+dialog input, dialog select, dialog textarea { display: block; width: 100%; margin-top: 4px; color: var(--ink); }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.spacer { flex: 1; }
+@media (max-width: 520px) { .userbar { width: 100%; } main { padding: 10px; } }

@@ -1,0 +1,24 @@
+# Render Blueprint: creates the web service from this repo's Dockerfile.
+# Deploys are triggered by GitHub Actions (autoDeploy is off) after tests pass.
+services:
+  - type: web
+    name: jobmail
+    runtime: docker
+    plan: free
+    autoDeploy: false
+    healthCheckPath: /healthz
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: ALLOWED_EMAIL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

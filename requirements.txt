@@ -1,0 +1,5 @@
+Flask>=3.0,<4
+gunicorn>=22
+requests>=2.31
+cryptography>=42
+psycopg[binary]>=3.1
