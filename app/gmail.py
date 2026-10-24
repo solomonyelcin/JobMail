@@ -13,13 +13,21 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
-SCOPES = "openid email https://www.googleapis.com/auth/gmail.readonly"
+SCOPES = ("openid email https://www.googleapis.com/auth/gmail.readonly "
+          "https://www.googleapis.com/auth/gmail.compose")
 TIMEOUT = 20
 
 JOB_KEYWORDS = (
-    'application OR applied OR "your application" OR interview OR candidate OR candidacy OR '
-    'recruiter OR hiring OR "job alert" OR "job opening" OR position OR vacancy OR '
-    '"offer letter" OR assessment OR "coding challenge" OR career OR careers'
+    'application OR applied OR "your application" OR interview OR candidate OR candidacy OR recruiter OR '
+    'recruitment OR hiring OR "job alert" OR job OR jobs OR opening OR openings OR position OR vacancy OR '
+    'vacancies OR "offer letter" OR assessment OR "coding challenge" OR career OR careers OR resume OR cv OR '
+    'shortlisted OR opportunity OR "walk-in"'
+)
+JOB_SENDERS = (
+    "linkedin.com OR naukri.com OR indeed.com OR glassdoor.com OR instahyre.com OR wellfound.com OR foundit.in OR "
+    "monsterindia.com OR shine.com OR cutshort.io OR hirist.tech OR iimjobs.com OR ambitionbox.com OR greenhouse.io OR "
+    "lever.co OR myworkday.com OR workable.com OR smartrecruiters.com OR ashbyhq.com OR icims.com OR jobvite.com OR "
+    "hackerrank.com OR hirevue.com OR bamboohr.com"
 )
 
 
@@ -62,7 +70,7 @@ def get_userinfo(access_token):
 
 
 def build_query(days):
-    return f"newer_than:{int(days)}d -in:spam -in:trash ({JOB_KEYWORDS})"
+    return f"newer_than:{int(days)}d -in:spam -in:trash (({JOB_KEYWORDS}) OR from:({JOB_SENDERS}))"
 
 
 class GmailClient:
@@ -86,6 +94,18 @@ class GmailClient:
             if not token:
                 break
         return ids[:max_total]
+
+    def list_unread_ids(self, days, max_total=1000):
+        return self.list_message_ids(build_query(days) + " is:unread", max_total)
+
+    def create_draft(self, raw_b64url, thread_id=None):
+        """Create a Gmail draft from a base64url RFC 822 message. Returns the API response."""
+        message = {"raw": raw_b64url}
+        if thread_id:
+            message["threadId"] = thread_id
+        r = self.s.post(f"{GMAIL_API}/drafts", headers=self.h, json={"message": message}, timeout=TIMEOUT)
+        r.raise_for_status()
+        return r.json()
 
     def get_message(self, msg_id):
         r = self.s.get(f"{GMAIL_API}/messages/{msg_id}", headers=self.h,
@@ -141,6 +161,9 @@ def parse_message(msg):
         "subject": headers.get("subject", ""),
         "sender": headers.get("from", ""),
         "snippet": msg.get("snippet", ""),
+        "is_unread": 1 if "UNREAD" in (msg.get("labelIds") or []) else 0,
+        "message_id": headers.get("message-id", "")[:300],
+        "reply_to": headers.get("reply-to", "")[:300],
         "body_text": re.sub(r"\n{3,}", "\n\n", text).strip()[:4000],
         "received_at": received.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }

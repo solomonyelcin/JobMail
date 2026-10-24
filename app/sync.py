@@ -43,16 +43,21 @@ def upsert_application(conn, company, role, status, ts):
     return row["id"]
 
 
-def run_sync(db, gmail, days, batch):
-    """Fetch up to `batch` unseen messages, keep the job-related ones.
+def run_sync(db, gmail, days, batch, ai_enabled=False):
+    """Fetch up to `batch` unseen messages and keep the job-related ones.
 
+    With ai_enabled, messages the rules cannot place are stored as category "pending" so the AI step decides.
     Returns {"checked", "stored", "remaining"}; call again while remaining > 0.
     """
     conn = db.connect()
     try:
         ids = gmail.list_message_ids(build_query(days))
-        seen = {r["gmail_id"] for r in conn.all("SELECT gmail_id FROM seen_messages")}
-        new_ids = [i for i in ids if i not in seen]
+        skip = {r["gmail_id"] for r in conn.all("SELECT gmail_id FROM seen_messages")}
+        skip |= {r["gmail_id"] for r in conn.all("SELECT gmail_id FROM ignored_messages")}
+        existing = {r["gmail_id"] for r in conn.all("SELECT gmail_id FROM emails")}
+        for gid in existing:  # stored already (e.g. after a rescan): just remember them
+            conn.execute("INSERT INTO seen_messages (gmail_id) VALUES (?) ON CONFLICT DO NOTHING", (gid,))
+        new_ids = [i for i in ids if i not in skip and i not in existing]
         todo, remaining = new_ids[:batch], max(0, len(new_ids) - batch)
 
         fetched = gmail.get_messages(todo)
@@ -68,7 +73,9 @@ def run_sync(db, gmail, days, batch):
         stored = 0
         for m in messages:
             conn.execute("INSERT INTO seen_messages (gmail_id) VALUES (?) ON CONFLICT DO NOTHING", (m["gmail_id"],))
-            cat = classify(m["subject"], m["snippet"], m["body_text"])
+            cat = classify(m["subject"], m["snippet"], m["body_text"], m["sender"])
+            if not cat and ai_enabled:
+                cat = "pending"
             if not cat:
                 continue
             company = extract_company(m["sender"], m["subject"])
@@ -78,12 +85,15 @@ def run_sync(db, gmail, days, batch):
                 app_id = upsert_application(conn, company, role, STATUS_BY_CATEGORY[cat], m["received_at"])
             conn.execute(
                 "INSERT INTO emails (gmail_id, thread_id, subject, sender, sender_email, snippet, body_text,"
-                " received_at, category, company, role, application_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-                " ON CONFLICT (gmail_id) DO NOTHING",
+                " received_at, category, company, role, application_id, is_unread, message_id, reply_to)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (gmail_id) DO NOTHING",
                 (m["gmail_id"], m["thread_id"], m["subject"], m["sender"], _addr(m["sender"]), m["snippet"],
-                 m["body_text"], m["received_at"], cat, company, role, app_id),
+                 m["body_text"], m["received_at"], cat, company, role, app_id, m.get("is_unread", 0),
+                 m.get("message_id", ""), m.get("reply_to", "")),
             )
             stored += 1
+        if remaining == 0 and hasattr(gmail, "list_unread_ids"):
+            refresh_unread(conn, gmail, days)
         conn.commit()
         return {"checked": len(todo), "stored": stored, "remaining": remaining}
     except Exception:
@@ -93,31 +103,46 @@ def run_sync(db, gmail, days, batch):
         conn.close()
 
 
+def refresh_unread(conn, gmail, days):
+    """Copy Gmail's current unread state onto stored emails (so reading mail in Gmail is reflected here)."""
+    unread = set(gmail.list_unread_ids(days))
+    current = {r["gmail_id"]: r["is_unread"] for r in conn.all("SELECT gmail_id, is_unread FROM emails")}
+    for gid, flag in current.items():
+        want = 1 if gid in unread else 0
+        if want != flag:
+            conn.execute("UPDATE emails SET is_unread=? WHERE gmail_id=?", (want, gid))
+
+
 def _addr(sender):
     m = re.search(r"<([^>]+)>", sender or "")
     return (m.group(1) if m else (sender or "")).strip().lower()
 
 
-CLASSIFIER_VERSION = "2"
+CLASSIFIER_VERSION = "3"
 
 
 def reclassify_all(db):
-    """Re-run classification on stored emails and rebuild automatic applications.
+    """Re-run the rules on stored emails and rebuild automatic applications.
 
-    Applications whose status the user edited (status_locked) and manual ones are kept.
+    AI-analysed emails keep their AI category. Applications whose status the user edited (status_locked)
+    and manual ones are kept.
     """
     conn = db.connect()
     try:
-        rows = conn.all("SELECT id, subject, sender, snippet, body_text, received_at FROM emails ORDER BY received_at")
+        rows = conn.all("SELECT id, subject, sender, snippet, body_text, received_at, category, company, role,"
+                        " ai_status FROM emails ORDER BY received_at")
         conn.execute("UPDATE emails SET application_id=NULL")
         conn.execute("DELETE FROM applications WHERE source='auto' AND status_locked=0")
         for r in rows:
-            cat = classify(r["subject"], r["snippet"], r["body_text"])
-            if not cat:
-                conn.execute("DELETE FROM emails WHERE id=?", (r["id"],))
-                continue
-            company = extract_company(r["sender"], r["subject"])
-            role = extract_role(r["subject"], r["body_text"])
+            if r["ai_status"] == "done" or r["category"] == "pending":
+                cat, company, role = r["category"], r["company"], r["role"]
+            else:
+                cat = classify(r["subject"], r["snippet"], r["body_text"], r["sender"])
+                if not cat:
+                    conn.execute("DELETE FROM emails WHERE id=?", (r["id"],))
+                    continue
+                company = extract_company(r["sender"], r["subject"])
+                role = extract_role(r["subject"], r["body_text"])
             app_id = None
             if cat in STATUS_BY_CATEGORY and company:
                 app_id = upsert_application(conn, company, role, STATUS_BY_CATEGORY[cat], r["received_at"])
@@ -132,7 +157,10 @@ def reclassify_all(db):
 
 
 def ensure_classifier_current(db):
-    """Re-classify stored emails once whenever the rules change (CLASSIFIER_VERSION bump)."""
+    """When the rules change: re-classify stored emails and schedule a one-time rescan of the sync window.
+
+    Messages dropped by older rules are remembered in seen_messages; clearing it lets them be evaluated again.
+    """
     conn = db.connect()
     try:
         row = conn.one("SELECT value FROM meta WHERE key='classifier_version'")
@@ -145,9 +173,19 @@ def ensure_classifier_current(db):
         reclassify_all(db)
     conn = db.connect()
     try:
-        conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('classifier_version', ?) "
-            "ON CONFLICT (key) DO UPDATE SET value=excluded.value", (CLASSIFIER_VERSION,))
+        conn.execute("DELETE FROM seen_messages")
+        set_meta(conn, "needs_rescan", "1")
+        set_meta(conn, "classifier_version", CLASSIFIER_VERSION)
         conn.commit()
     finally:
         conn.close()
+
+
+def set_meta(conn, key, value):
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+                 (key, value))
+
+
+def get_meta(conn, key, default=""):
+    row = conn.one("SELECT value FROM meta WHERE key=?", (key,))
+    return row["value"] if row else default

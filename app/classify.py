@@ -88,7 +88,14 @@ ROLE_PATTERNS = [
 ]
 
 
-def classify(subject: str, snippet: str, body: str):
+JOB_BOARD_DOMAINS = (
+    "linkedin.com", "naukri.com", "indeed.com", "glassdoor.com", "instahyre.com", "wellfound.com", "foundit.in",
+    "monsterindia.com", "shine.com", "cutshort.io", "hirist.tech", "iimjobs.com", "ambitionbox.com",
+)
+JOB_SUBJECT = re.compile(r"\bjobs?\b|hiring|vacanc|opportunit|openings?|recommended|\broles?\b|positions?|shortlist", re.I)
+
+
+def classify(subject: str, snippet: str, body: str, sender: str = ""):
     """Return the category for a message, or None if it does not look job related."""
     subject = subject or ""
     text = f"{subject}\n{snippet or ''}\n{(body or '')[:2000]}"
@@ -99,6 +106,10 @@ def classify(subject: str, snippet: str, body: str):
         for p in patterns:
             if p.search(subject) or p.search(text):
                 return cat
+    # job-board mail (alerts, recommendations) that none of the phrase rules caught
+    domain = parse_sender(sender)[1].split("@")[-1]
+    if domain and any(domain == d or domain.endswith("." + d) for d in JOB_BOARD_DOMAINS) and JOB_SUBJECT.search(subject):
+        return "opening"
     return None
 
 

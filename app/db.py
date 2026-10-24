@@ -69,6 +69,7 @@ class Database:
     def init_schema(self):
         pk = "SERIAL PRIMARY KEY" if self.is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
         conn = self.connect()
+        blob = "BYTEA" if self.is_pg else "BLOB"
         stmts = [
             f"""CREATE TABLE IF NOT EXISTS accounts (
                 id {pk},
@@ -108,6 +109,17 @@ class Database:
             )""",
             "CREATE TABLE IF NOT EXISTS seen_messages (gmail_id TEXT PRIMARY KEY)",
             "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS ignored_messages (gmail_id TEXT PRIMARY KEY)",
+            f"""CREATE TABLE IF NOT EXISTS profile (
+                id INTEGER PRIMARY KEY,
+                full_name TEXT NOT NULL DEFAULT '',
+                profile_text TEXT NOT NULL DEFAULT '',
+                resume_filename TEXT NOT NULL DEFAULT '',
+                resume_mime TEXT NOT NULL DEFAULT '',
+                resume_data {blob},
+                resume_text TEXT NOT NULL DEFAULT '',
+                resume_updated_at TEXT
+            )""",
             "CREATE INDEX IF NOT EXISTS idx_emails_received ON emails (received_at)",
             "CREATE INDEX IF NOT EXISTS idx_emails_category ON emails (category)",
             "CREATE INDEX IF NOT EXISTS idx_emails_app ON emails (application_id)",
@@ -115,7 +127,31 @@ class Database:
         for s in stmts:
             conn.execute(s)
         conn.commit()
+        self._ensure_columns(conn)
         conn.close()
+
+    # columns added after the first release: (table, column, DDL type/default)
+    NEW_COLUMNS = [
+        ("emails", "is_unread", "INTEGER NOT NULL DEFAULT 0"),
+        ("emails", "message_id", "TEXT NOT NULL DEFAULT ''"),
+        ("emails", "reply_to", "TEXT NOT NULL DEFAULT ''"),
+        ("emails", "ai_status", "TEXT NOT NULL DEFAULT ''"),
+        ("emails", "ai_summary", "TEXT NOT NULL DEFAULT ''"),
+        ("emails", "fit_score", "INTEGER"),
+        ("emails", "fit_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("accounts", "scope", "TEXT NOT NULL DEFAULT ''"),
+    ]
+
+    def _ensure_columns(self, conn):
+        for table, col, ddl in self.NEW_COLUMNS:
+            if self.is_pg:
+                have = {r["column_name"] for r in conn.all(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name=?", (table,))}
+            else:
+                have = {r["name"] for r in conn.all(f"PRAGMA table_info({table})")}
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        conn.commit()
 
 
 class _NoClose:

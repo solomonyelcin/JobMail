@@ -5,13 +5,15 @@ const AUTO_SYNC_MS = 5 * 60 * 1000;
 
 const S = {
   statuses: [], categories: [], view: "board", apps: [], statusFilter: "", sort: "recent",
-  emailPage: 1, emailCat: "", editing: null, drawerId: null, syncing: false, lastSync: null,
+  emailPage: 1, emailCat: "", unreadOnly: false, editing: null, drawerId: null, syncing: false, analyzing: false,
+  lastSync: null, aiEnabled: false, canDraft: false, profile: null,
 };
 
 // ---------- utilities ----------
 async function api(method, url, body) {
   const opts = { method, headers: { "X-Requested-With": "JobMail" }, credentials: "same-origin" };
-  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  if (body instanceof FormData) opts.body = body;
+  else if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   const res = await fetch(url, opts);
   let data = {};
   try { data = await res.json(); } catch (_) { /* empty body */ }
@@ -101,6 +103,7 @@ async function boot() {
   if (!me.authenticated) return showLogin();
   S.statuses = me.statuses; S.categories = me.categories;
   S.lastSync = me.last_sync_at ? parseTs(me.last_sync_at) : null;
+  S.aiEnabled = !!me.ai_enabled; S.canDraft = !!me.can_draft;
   fillSelect($("fStatus"), S.statuses);
   buildCatChips();
   $("login").classList.add("hidden"); $("app").classList.remove("hidden"); $("userbar").classList.remove("hidden");
@@ -109,7 +112,10 @@ async function boot() {
   await refreshAll();
   maybeAutoSync();
 }
-function refreshAll() { return Promise.all([loadStats(), loadApps(), S.view === "emails" ? loadEmails(true) : Promise.resolve()]); }
+function refreshAll() {
+  const extra = S.view === "emails" ? loadEmails(true) : S.view === "matches" ? loadMatches() : Promise.resolve();
+  return Promise.all([loadStats(), loadApps(), extra]);
+}
 
 // ---------- sync pill + auto sync ----------
 function setPill(state, text) {
@@ -125,8 +131,10 @@ async function sync(opts = {}) {
   S.syncing = true; setPill("syncing");
   let checked = 0, stored = 0;
   try {
+    let first = true;
     for (;;) {
-      const r = await api("POST", "/api/sync", opts.full ? { full: true } : {});
+      const r = await api("POST", "/api/sync", first && opts.rescan ? { rescan: true } : {});
+      first = false;
       checked += r.checked; stored += r.stored;
       setPill("syncing", `Syncing… ${checked}`);
       if (r.stored > 0) refreshAll();
@@ -137,6 +145,8 @@ async function sync(opts = {}) {
     if (stored > 0) toast(`${stored} new job email${stored === 1 ? "" : "s"} found`, "ok");
     else if (!opts.silent) toast("Up to date", "ok");
     setPill("ok");
+    S.syncing = false;
+    await runAnalysis();
   } catch (err) {
     setPill("error", "Sync failed");
     if (err.data && err.data.error === "reauth") { showLogin("Google access expired. Please sign in again."); }
@@ -159,9 +169,10 @@ async function loadStats() {
     const b = el("button", "chip-stat" + (S.statusFilter === status ? " active" : ""));
     b.style.setProperty("--c", color);
     b.append(el("b", "", String(n)), el("span", "", label));
-    b.addEventListener("click", () => { S.statusFilter = S.statusFilter === status ? "" : status; if (S.view === "emails") setView("board"); loadStats(); loadApps(); });
+    b.addEventListener("click", () => { S.statusFilter = S.statusFilter === status ? "" : status; if (!["board", "list"].includes(S.view)) setView("board"); loadStats(); loadApps(); });
     box.append(b);
   };
+  $("unreadBadge").textContent = String(s.unread); $("unreadBadge").classList.toggle("hidden", !s.unread);
   chip("All", s.total_applications, "", "var(--brand)");
   ["saved", "applied", "assessment", "interview", "offer", "rejected", "withdrawn"].forEach((k) => {
     if (k === "withdrawn" && !(s.applications[k])) return;
@@ -176,6 +187,7 @@ async function loadStats() {
   const replied = sent - (a.applied || 0);
   card("Response rate", sent ? Math.round((replied / sent) * 100) + "%" : "–", sent ? `${replied} of ${sent} moved past “applied”` : "Apply to get started");
   const st = card("Needs follow-up", String(s.stale), "quiet for 14+ days");
+  if (s.strong_matches) { const m = card("Strong job matches", String(s.strong_matches), "fit score 70+ — tap to view"); m.style.cursor = "pointer"; m.addEventListener("click", () => setView("matches")); }
   if (s.stale) { st.style.cursor = "pointer"; st.addEventListener("click", () => { S.sort = "recent"; $("sort").value = "recent"; setView("list"); toast("Oldest activity is at the bottom"); }); }
   const w = card("Emails per week", String(s.weekly.reduce((n, x) => n + x.count, 0)), "last 8 weeks");
   w.append(sparkline(s.weekly));
@@ -331,11 +343,15 @@ function buildCatChips() {
     b.addEventListener("click", () => { S.emailCat = c; buildCatChips(); loadEmails(true); });
     box.append(b);
   });
+  const u = el("button", "chip" + (S.unreadOnly ? " active" : ""), "unread");
+  u.addEventListener("click", () => { S.unreadOnly = !S.unreadOnly; buildCatChips(); loadEmails(true); });
+  box.append(u);
 }
 async function loadEmails(reset) {
   if (reset) S.emailPage = 1;
   const p = new URLSearchParams({ q: $("q").value, category: S.emailCat, from: $("emailFrom").value, to: $("emailTo").value, page: S.emailPage });
   if (S.statusFilter) p.set("status", S.statusFilter);
+  if (S.unreadOnly) p.set("unread", "1");
   const box = $("emailList");
   if (reset) skeleton(box);
   const data = await api("GET", "/api/emails?" + p);
@@ -345,11 +361,15 @@ async function loadEmails(reset) {
   $("moreBtn").classList.toggle("hidden", S.emailPage * data.page_size >= data.total);
 }
 function emailCard(e) {
-  const card = el("div", "email"), ts = terms();
+  const card = el("div", "email" + (e.is_unread ? " unread" : "")), ts = terms();
   const head = el("div", "head"); const left = el("div");
-  const h = el("h3"); appendHighlighted(h, e.subject || "(no subject)", ts);
+  const h = el("h3"); if (e.is_unread) h.append(el("span", "unread-dot")); appendHighlighted(h, e.subject || "(no subject)", ts);
   const sub = el("div", "sub"); appendHighlighted(sub, e.sender, ts); sub.append(" · " + ago(e.received_at));
-  left.append(h, sub); head.append(left, badge(e.category)); card.append(head);
+  const right = el("div", "badges");
+  if (e.fit_score !== null && e.fit_score !== undefined) right.append(fitBadge(e.fit_score));
+  right.append(badge(e.category));
+  left.append(h, sub); head.append(left, right); card.append(head);
+  if (e.ai_summary) { const ai = el("div", "ai"); appendHighlighted(ai, e.ai_summary, ts); card.append(ai); }
   const sn = el("div", "snip"); appendHighlighted(sn, e.snippet, ts); card.append(sn);
   let body = null;
   const actions = el("div", "actions");
@@ -357,6 +377,7 @@ function emailCard(e) {
     const open = el("button", "link", "Open application" + (e.company ? " · " + e.company : ""));
     open.addEventListener("click", () => openDrawer(e.application_id)); actions.append(open);
   }
+  if (S.aiEnabled) { const reply = el("button", "link", "✦ Reply with AI"); reply.addEventListener("click", () => openCompose(e)); actions.append(reply); }
   const not = el("button", "link", "Not job-related");
   not.addEventListener("click", async () => {
     if (!confirm("Remove this email from JobMail? It will not be imported again.")) return;
@@ -393,24 +414,167 @@ $("dlgForm").addEventListener("submit", async (ev) => {
 $("dlgCancel").addEventListener("click", () => $("dlg").close());
 $("addBtn").addEventListener("click", () => openDialog(null));
 
+// ---------- AI analysis ----------
+async function runAnalysis(opts = {}) {
+  if (!S.aiEnabled || S.analyzing || S.syncing) return;
+  S.analyzing = true;
+  let analyzed = 0, errors = 0, first = true;
+  try {
+    for (;;) {
+      const r = await api("POST", "/api/ai/analyze", first ? opts : {});
+      first = false;
+      analyzed += r.analyzed; errors += r.errors;
+      if (r.remaining) setPill("syncing", `AI sorting… ${r.remaining} left`);
+      if (r.analyzed || r.removed) refreshAll();
+      if (!r.remaining || r.analyzed + r.removed === 0) break;
+    }
+    await refreshAll();
+    if (analyzed) toast(`AI sorted ${analyzed} email${analyzed === 1 ? "" : "s"}`, "ok");
+    if (errors) toast(`${errors} email${errors === 1 ? "" : "s"} could not be analysed. Use “Re-score” on the Profile page to retry.`, "error");
+  } catch (err) { toast("AI analysis failed: " + err.message, "error"); }
+  finally { S.analyzing = false; setPill("ok"); }
+}
+
+// ---------- matches ----------
+function fitBadge(score) {
+  return el("span", "fit " + (score >= 75 ? "high" : score >= 50 ? "mid" : "low"), String(score));
+}
+async function loadMatches() {
+  const box = $("matchesList"); skeleton(box, 2);
+  const { items } = await api("GET", "/api/matches");
+  box.replaceChildren();
+  $("matchesNote").textContent = !S.aiEnabled
+    ? "Turn on AI (Profile page) to score job openings against your profile."
+    : items.length ? `${items.length} scored opening${items.length === 1 ? "" : "s"}, best first.` : "No scored openings yet. They appear after the next sync.";
+  items.forEach((m) => box.append(matchCard(m)));
+}
+function matchCard(m) {
+  const card = el("div", "match");
+  const sc = el("div", "score"); sc.style.setProperty("--p", String(m.fit_score));
+  sc.style.setProperty("--c", m.fit_score >= 75 ? "var(--offer)" : m.fit_score >= 50 ? "var(--interview)" : "var(--withdrawn)");
+  sc.append(el("span", "", String(m.fit_score))); card.append(sc);
+  const body = el("div");
+  const title = m.role ? m.role + (m.company ? " at " + m.company : "") : (m.subject || "(no subject)");
+  const h = el("h3"); if (m.is_unread) h.append(el("span", "unread-dot")); h.append(title); body.append(h);
+  if (m.fit_reason) body.append(el("div", "why", m.fit_reason));
+  if (m.ai_summary) body.append(el("div", "muted", m.ai_summary));
+  body.append(el("div", "muted small", `${m.sender} · ${ago(m.received_at)} · ${cap(m.category)}`));
+  const actions = el("div", "row wrap");
+  const reply = el("button", "btn primary", "✦ Reply / apply with AI"); reply.addEventListener("click", () => openCompose(m));
+  const view = el("button", "btn", "View email");
+  view.addEventListener("click", () => { S.emailCat = ""; $("q").value = m.subject || ""; setView("emails"); });
+  actions.append(reply, view); body.append(actions); card.append(body);
+  return card;
+}
+
+// ---------- profile & resume ----------
+async function loadProfile() {
+  const p = await api("GET", "/api/profile"); S.profile = p;
+  $("pName").value = p.full_name; $("pText").value = p.profile_text;
+  const info = $("resumeInfo");
+  if (p.resume) {
+    info.textContent = `${p.resume.filename} · ${Math.max(1, Math.round(p.resume.size / 1024))} KB · updated ${ago(p.resume.updated_at)}` +
+      (p.resume.text_extracted ? "" : ". Could not read text from this file, so paste a short profile below for the AI.");
+  } else info.textContent = "No resume uploaded.";
+  $("resumeDownload").classList.toggle("hidden", !p.resume); $("resumeDelete").classList.toggle("hidden", !p.resume);
+  $("aiStatus").textContent = (S.aiEnabled
+    ? "AI is on: emails are sorted, openings are scored against your profile and replies can be drafted."
+    : "AI is off. To enable it, add an ANTHROPIC_API_KEY environment variable on your host (see docs/DEPLOYMENT.md).") +
+    (S.canDraft ? "" : " Reply drafts need one more Google permission.");
+  $("reanalyzeBtn").classList.toggle("hidden", !S.aiEnabled);
+  $("reconnectBtn").classList.toggle("hidden", S.canDraft);
+}
+$("pSave").addEventListener("click", async () => {
+  try {
+    await api("PUT", "/api/profile", { full_name: $("pName").value, profile_text: $("pText").value });
+    $("pMsg").textContent = "Saved."; toast("Profile saved", "ok");
+    if (S.aiEnabled) toast("Use “Re-score all emails” to apply it to existing emails");
+  } catch (e) { toast("Could not save profile", "error"); }
+});
+$("resumeFile").addEventListener("change", async () => {
+  const f = $("resumeFile").files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  try { await api("POST", "/api/resume", fd); toast("Resume uploaded", "ok"); await loadProfile(); }
+  catch (e) {
+    toast(({ unsupported_type: "Use a PDF, DOCX or TXT file.", too_large: "File is larger than 2 MB.", not_a_pdf: "That is not a valid PDF.",
+      not_a_docx: "That is not a valid DOCX.", empty_file: "The file is empty." })[e.message] || "Upload failed", "error");
+  }
+  $("resumeFile").value = "";
+});
+$("resumeDelete").addEventListener("click", async () => {
+  if (!confirm("Remove your resume? Reply drafts will no longer attach it.")) return;
+  await api("DELETE", "/api/resume"); toast("Resume removed"); loadProfile();
+});
+$("reanalyzeBtn").addEventListener("click", () => runAnalysis({ reanalyze: true, retry: true }));
+$("rescanBtn").addEventListener("click", () => { toast("Rescanning the last 3 months…"); sync({ rescan: true }); });
+
+// ---------- reply with AI ----------
+const C = { emailId: null };
+function composeReset() {
+  ["composeForm", "composeDone", "cRewrite", "cCreate"].forEach((id) => $(id).classList.add("hidden"));
+  $("composeStatus").classList.remove("hidden"); $("composeStatus").textContent = "Writing a draft…"; $("composeWarn").classList.add("hidden");
+}
+async function openCompose(e) {
+  if (!S.aiEnabled) { toast("AI is off. See the Profile page.", "error"); return; }
+  C.emailId = e.id; composeReset(); $("cInstr").value = ""; $("composeDlg").showModal();
+  await generateDraft("");
+}
+async function generateDraft(instructions) {
+  composeReset();
+  try {
+    const r = await api("POST", `/api/emails/${C.emailId}/compose`, { instructions });
+    $("cTo").value = r.to; $("cSubject").value = r.subject; $("cBody").value = r.body;
+    $("cAttach").checked = r.has_resume; $("cAttach").disabled = !r.has_resume;
+    $("cAttachLabel").textContent = r.has_resume ? "Attach my resume" : "Attach my resume (upload one on the Profile page first)";
+    const warns = [];
+    if (r.no_reply) warns.push("This sender looks like a no-reply address, so a reply may never be read.");
+    if (!r.to) warns.push("No reply address found. Enter one in the To field.");
+    $("composeWarn").textContent = warns.join(" "); $("composeWarn").classList.toggle("hidden", !warns.length);
+    $("composeStatus").classList.add("hidden");
+    ["composeForm", "cRewrite", "cCreate"].forEach((id) => $(id).classList.remove("hidden"));
+  } catch (err) { $("composeStatus").textContent = "Could not write a draft right now. Please try again."; }
+}
+$("cRewrite").addEventListener("click", () => generateDraft($("cInstr").value));
+$("cClose").addEventListener("click", () => $("composeDlg").close());
+$("cCreate").addEventListener("click", async () => {
+  $("cCreate").disabled = true;
+  try {
+    const r = await api("POST", `/api/emails/${C.emailId}/draft`, {
+      to: $("cTo").value, subject: $("cSubject").value, body: $("cBody").value, attach_resume: $("cAttach").checked,
+    });
+    ["composeForm", "cRewrite", "cCreate"].forEach((id) => $(id).classList.add("hidden"));
+    $("composeDone").classList.remove("hidden");
+    const ok = typeof r.url === "string" && r.url.startsWith("https://mail.google.com/");
+    $("composeLink").href = ok ? r.url : "https://mail.google.com/mail/u/0/#drafts";
+    toast(r.attached ? "Draft created with your resume attached" : "Draft created", "ok");
+  } catch (err) {
+    $("composeWarn").textContent = err.data && err.data.error === "reauth_scope"
+      ? "JobMail needs permission to create drafts. Open the Profile page and use “Re-connect Google”."
+      : "Could not create the draft: " + err.message;
+    $("composeWarn").classList.remove("hidden");
+  } finally { $("cCreate").disabled = false; }
+});
+
 // ---------- views & wiring ----------
+const VIEWS = {
+  board: ["boardView", "viewBoard"], list: ["listView", "viewList"], emails: ["emailsView", "viewEmails"],
+  matches: ["matchesView", "viewMatches"], profile: ["profileView", "viewProfile"],
+};
 function setView(v, load = true) {
   S.view = v;
-  $("boardView").classList.toggle("hidden", v !== "board");
-  $("listView").classList.toggle("hidden", v !== "list");
-  $("emailsView").classList.toggle("hidden", v !== "emails");
-  $("viewBoard").classList.toggle("active", v === "board");
-  $("viewList").classList.toggle("active", v === "list");
-  $("viewEmails").classList.toggle("active", v === "emails");
-  $("sort").classList.toggle("hidden", v === "emails");
-  $("addBtn").classList.toggle("hidden", v === "emails");
+  Object.entries(VIEWS).forEach(([k, [vid, bid]]) => { $(vid).classList.toggle("hidden", k !== v); $(bid).classList.toggle("active", k === v); });
+  const apps = v === "board" || v === "list";
+  $("sort").classList.toggle("hidden", !apps); $("addBtn").classList.toggle("hidden", !apps);
+  $("searchBox").classList.toggle("hidden", !(apps || v === "emails"));
   $("q").placeholder = v === "emails" ? "Search emails…  ( press / )" : "Search applications…  ( press / )";
   if (!load) return;
-  if (v === "emails") loadEmails(true); else loadApps();
+  ({ board: loadApps, list: loadApps, emails: () => loadEmails(true), matches: loadMatches, profile: loadProfile })[v]();
 }
 $("viewBoard").addEventListener("click", () => setView("board"));
 $("viewList").addEventListener("click", () => setView("list"));
 $("viewEmails").addEventListener("click", () => setView("emails"));
+$("viewMatches").addEventListener("click", () => setView("matches"));
+$("viewProfile").addEventListener("click", () => setView("profile"));
 $("sort").addEventListener("change", () => { S.sort = $("sort").value; loadApps(); });
 const onSearch = debounce(() => (S.view === "emails" ? loadEmails(true) : loadApps()));
 $("q").addEventListener("input", onSearch);

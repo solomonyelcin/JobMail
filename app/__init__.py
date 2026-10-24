@@ -5,6 +5,7 @@ from flask import Flask, jsonify, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .api import bp
+from . import api_extra  # noqa: F401  (registers more routes on the same blueprint)
 from .config import load_config
 from .crypto import TokenCipher
 from .db import Database

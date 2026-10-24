@@ -25,10 +25,11 @@
       <div class="hero-card">
         <div class="logo big" aria-hidden="true">✉</div>
         <h2>Your job search, organised automatically</h2>
-        <p class="muted">JobMail reads your Gmail (read-only), keeps only job-related emails, and tracks every application from applied to offer.</p>
+        <p class="muted">JobMail reads your Gmail, keeps only job-related emails from the last 3 months, and tracks every application from applied to offer. It only creates reply drafts when you ask, and never sends anything itself.</p>
         <ul class="features">
           <li>Automatic sync, no button needed</li>
           <li>Kanban board with drag and drop</li>
+          <li>AI that spots the best-fit jobs and drafts replies</li>
           <li>Search, filters and CSV export</li>
         </ul>
         <p id="loginError" class="error hidden"></p>
@@ -44,9 +45,11 @@
         <div class="seg" role="tablist" aria-label="View">
           <button id="viewBoard" class="seg-btn active" role="tab">Board</button>
           <button id="viewList" class="seg-btn" role="tab">List</button>
-          <button id="viewEmails" class="seg-btn" role="tab">Emails</button>
+          <button id="viewEmails" class="seg-btn" role="tab">Emails <span id="unreadBadge" class="count-badge hidden"></span></button>
+          <button id="viewMatches" class="seg-btn" role="tab">Best matches</button>
+          <button id="viewProfile" class="seg-btn" role="tab">Profile</button>
         </div>
-        <div class="search">
+        <div class="search" id="searchBox">
           <span aria-hidden="true">⌕</span>
           <input id="q" type="search" placeholder="Search…  ( press / )" autocomplete="off">
         </div>
@@ -60,6 +63,45 @@
 
       <div id="boardView" class="board"></div>
       <div id="listView" class="list hidden"></div>
+
+      <div id="matchesView" class="hidden">
+        <p id="matchesNote" class="muted"></p>
+        <div id="matchesList" class="list"></div>
+      </div>
+
+      <div id="profileView" class="hidden profile">
+        <section class="panel">
+          <h3>Resume</h3>
+          <p class="muted">Attached to the reply drafts JobMail creates. PDF, DOCX or TXT, up to 2 MB.</p>
+          <div id="resumeInfo" class="muted">No resume uploaded.</div>
+          <div class="row wrap">
+            <label class="btn primary" for="resumeFile">Upload / replace</label>
+            <input id="resumeFile" type="file" accept=".pdf,.docx,.txt,.md" class="hidden">
+            <a id="resumeDownload" class="btn hidden" href="/api/resume">Download</a>
+            <button id="resumeDelete" class="btn danger hidden">Remove</button>
+          </div>
+        </section>
+        <section class="panel">
+          <h3>About you</h3>
+          <p class="muted">The AI uses this to score jobs and write replies. Add your skills, experience, target roles and preferred locations. It is filled from your resume on first upload; edit it freely.</p>
+          <label>Full name <input id="pName" maxlength="100" autocomplete="name"></label>
+          <label>Profile <textarea id="pText" rows="10" maxlength="8000" placeholder="Backend engineer, 4 years .NET and Python. Looking for senior backend roles, remote or Chennai…"></textarea></label>
+          <div class="row wrap">
+            <button id="pSave" class="btn primary">Save</button>
+            <span id="pMsg" class="muted"></span>
+          </div>
+        </section>
+        <section class="panel">
+          <h3>AI &amp; mailbox</h3>
+          <p id="aiStatus" class="muted"></p>
+          <div class="row wrap">
+            <button id="reanalyzeBtn" class="btn hidden">Re-score all emails with my latest profile</button>
+            <button id="rescanBtn" class="btn">Rescan last 3 months</button>
+            <a id="reconnectBtn" class="btn hidden" href="/auth/login">Re-connect Google (allow drafts)</a>
+          </div>
+          <p class="muted small">Rescan re-checks every message from the last 3 months, including ones skipped earlier. When AI is on, email text and your profile are sent to Anthropic's API for analysis.</p>
+        </section>
+      </div>
 
       <div id="emailsView" class="hidden">
         <div class="email-filters">
@@ -94,6 +136,29 @@
         <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="composeDlg">
+    <h3>Reply with AI</h3>
+    <p id="composeStatus" class="muted">Writing a draft…</p>
+    <div id="composeForm" class="hidden">
+      <label>To <input id="cTo" type="email"></label>
+      <label>Subject <input id="cSubject" maxlength="200"></label>
+      <label>Message <textarea id="cBody" rows="11" maxlength="6000"></textarea></label>
+      <label class="check"><input id="cAttach" type="checkbox" checked> <span id="cAttachLabel">Attach my resume</span></label>
+      <label>Instructions for a rewrite (optional) <input id="cInstr" maxlength="300" placeholder="e.g. shorter, mention I can start in 30 days"></label>
+      <p id="composeWarn" class="error hidden"></p>
+    </div>
+    <div id="composeDone" class="hidden">
+      <p>Draft created in your Gmail. Review it there and press send.</p>
+      <a id="composeLink" class="btn primary" target="_blank" rel="noopener noreferrer">Open draft in Gmail</a>
+    </div>
+    <div class="row">
+      <button id="cRewrite" class="btn hidden">Rewrite</button>
+      <span class="spacer"></span>
+      <button id="cClose" class="btn">Close</button>
+      <button id="cCreate" class="btn primary hidden">Create Gmail draft</button>
+    </div>
   </dialog>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>

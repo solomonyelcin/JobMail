@@ -8,13 +8,13 @@ from functools import wraps
 import requests
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, request, session
 
-from . import gmail
-from .sync import now_iso, norm, run_sync
+from . import ai, gmail
+from .sync import get_meta, now_iso, norm, run_sync, set_meta
 
 bp = Blueprint("api", __name__)
 
 STATUSES = ["saved", "applied", "assessment", "interview", "offer", "rejected", "withdrawn"]
-CATEGORIES = ["applied", "assessment", "interview", "offer", "rejected", "opening"]
+CATEGORIES = ["applied", "assessment", "interview", "offer", "rejected", "opening", "recruiter"]
 PAGE = 25
 
 
@@ -96,11 +96,12 @@ def callback():
     if not refresh and not (existing and existing["refresh_token_enc"]):
         return redirect("/?auth_error=no_refresh_token")
     enc = current_app.extensions["jobmail_cipher"].encrypt(refresh) if refresh else existing["refresh_token_enc"]
+    scope = tokens.get("scope", "")
     if existing:
-        c.execute("UPDATE accounts SET refresh_token_enc=? WHERE id=?", (enc, existing["id"]))
+        c.execute("UPDATE accounts SET refresh_token_enc=?, scope=? WHERE id=?", (enc, scope, existing["id"]))
     else:
-        c.execute("INSERT INTO accounts (email, refresh_token_enc, created_at) VALUES (?,?,?)",
-                  (email, enc, now_iso()))
+        c.execute("INSERT INTO accounts (email, refresh_token_enc, created_at, scope) VALUES (?,?,?,?)",
+                  (email, enc, now_iso(), scope))
     c.commit()
     session.clear()
     session["email"] = email
@@ -119,9 +120,10 @@ def me():
     email = session.get("email")
     if not email or email != cfg("ALLOWED_EMAIL"):
         return jsonify(authenticated=False)
-    acct = conn().one("SELECT last_sync_at FROM accounts WHERE email=?", (email,))
+    acct = conn().one("SELECT last_sync_at, scope FROM accounts WHERE email=?", (email,))
     return jsonify(authenticated=True, email=email, last_sync_at=acct["last_sync_at"] if acct else None,
-                   statuses=STATUSES, categories=CATEGORIES)
+                   statuses=STATUSES, categories=CATEGORIES, ai_enabled=ai.enabled(cfg),
+                   can_draft=bool(acct and "gmail.compose" in (acct["scope"] or "")), sync_days=cfg("SYNC_DAYS"))
 
 
 # ---------- sync ----------
@@ -134,7 +136,12 @@ def sync():
         return jsonify(error="reauth"), 401
     body = request.get_json(silent=True) or {}
     days = max(1, min(int(body.get("days", cfg("SYNC_DAYS"))), 730))
-    if "days" not in body and not body.get("full") and acct["last_sync_at"]:
+    if body.get("rescan"):  # look at the whole window again, including mail skipped earlier
+        c.execute("DELETE FROM seen_messages")
+        set_meta(c, "needs_rescan", "1")
+        c.commit()
+    rescanning = get_meta(c, "needs_rescan") == "1"
+    if "days" not in body and not body.get("full") and not rescanning and acct["last_sync_at"]:
         # incremental sync: only look back to just before the previous successful sync (fast)
         try:
             last = datetime.strptime(acct["last_sync_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -144,7 +151,7 @@ def sync():
     try:
         refresh = current_app.extensions["jobmail_cipher"].decrypt(acct["refresh_token_enc"])
         client = current_app.extensions["gmail_factory"](cfg, refresh)
-        result = run_sync(current_app.extensions["jobmail_db"], client, days, cfg("SYNC_BATCH"))
+        result = run_sync(current_app.extensions["jobmail_db"], client, days, cfg("SYNC_BATCH"), ai.enabled(cfg))
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else 502
         if status in (400, 401):
@@ -155,6 +162,7 @@ def sync():
         return jsonify(error="gmail_unreachable"), 502
     if result["remaining"] == 0:
         c.execute("UPDATE accounts SET last_sync_at=? WHERE id=?", (now_iso(), acct["id"]))
+        set_meta(c, "needs_rescan", "0")
         c.commit()
     return jsonify(result)
 
@@ -163,9 +171,11 @@ def sync():
 @bp.get("/api/emails")
 @login_required
 def list_emails():
-    where, params = ["1=1"], []
+    where, params = ["e.category != 'pending'"], []
+    if request.args.get("unread") == "1":
+        where.append("e.is_unread=1")
     for term in request.args.get("q", "").split():
-        cl, p = like_clause(["e.subject", "e.sender", "e.snippet", "e.body_text", "e.company", "e.role"], term)
+        cl, p = like_clause(["e.subject", "e.sender", "e.snippet", "e.body_text", "e.company", "e.role", "e.ai_summary"], term)
         where.append(cl)
         params += p
     if request.args.get("category") in CATEGORIES:
@@ -193,6 +203,7 @@ def list_emails():
     page = max(1, int(request.args.get("page", 1) or 1))
     rows = conn().all(
         "SELECT e.id, e.subject, e.sender, e.snippet, e.received_at, e.category, e.company, e.role,"
+        " e.is_unread, e.ai_summary, e.fit_score, e.fit_reason,"
         f" e.application_id, a.status AS application_status {base}"
         " ORDER BY e.received_at DESC LIMIT ? OFFSET ?",
         params + [PAGE, (page - 1) * PAGE],
@@ -212,6 +223,9 @@ def get_email(email_id):
 def delete_email(email_id):
     """Remove a wrongly classified email. Its Gmail id stays in seen_messages so it is not re-imported."""
     c = conn()
+    row = c.one("SELECT gmail_id FROM emails WHERE id=?", (email_id,))
+    if row:
+        c.execute("INSERT INTO ignored_messages (gmail_id) VALUES (?) ON CONFLICT DO NOTHING", (row["gmail_id"],))
     c.execute("DELETE FROM emails WHERE id=?", (email_id,))
     c.commit()
     return jsonify(ok=True)
@@ -355,13 +369,14 @@ def delete_application(app_id):
 def stats():
     c = conn()
     apps = {r["status"]: r["n"] for r in c.all("SELECT status, COUNT(*) AS n FROM applications GROUP BY status")}
-    cats = {r["category"]: r["n"] for r in c.all("SELECT category, COUNT(*) AS n FROM emails GROUP BY category")}
+    cats = {r["category"]: r["n"] for r in c.all("SELECT category, COUNT(*) AS n FROM emails WHERE category != 'pending' GROUP BY category")}
 
     now = datetime.now(timezone.utc)
     fmt = "%Y-%m-%dT%H:%M:%SZ"
     start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(weeks=7)
     buckets = [0] * 8
-    for r in c.all("SELECT received_at FROM emails WHERE received_at >= ?", (start.strftime(fmt),)):
+    for r in c.all("SELECT received_at FROM emails WHERE category != 'pending' AND received_at >= ?",
+                   (start.strftime(fmt),)):
         try:
             idx = (datetime.strptime(r["received_at"], fmt).replace(tzinfo=timezone.utc) - start).days // 7
         except ValueError:
@@ -375,5 +390,10 @@ def stats():
     stale = c.one(
         "SELECT COUNT(*) AS n FROM applications WHERE status IN ('applied','assessment','interview')"
         " AND last_activity_at < ?", (stale_cutoff,))["n"]
+    unread = c.one("SELECT COUNT(*) AS n FROM emails WHERE is_unread=1 AND category != 'pending'")["n"]
+    pending_ai = c.one("SELECT COUNT(*) AS n FROM emails WHERE ai_status=''")["n"] if ai.enabled(cfg) else 0
+    matches = c.one("SELECT COUNT(*) AS n FROM emails WHERE category IN ('opening','recruiter')"
+                    " AND fit_score >= 70")["n"]
     return jsonify(applications=apps, emails=cats, total_emails=sum(cats.values()),
-                   total_applications=sum(apps.values()), weekly=weekly, stale=stale)
+                   total_applications=sum(apps.values()), weekly=weekly, stale=stale,
+                   unread=unread, pending_ai=pending_ai, strong_matches=matches)

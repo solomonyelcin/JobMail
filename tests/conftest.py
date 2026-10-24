@@ -3,6 +3,7 @@ import os
 import pytest
 from cryptography.fernet import Fernet
 
+import helpers
 from app import create_app
 
 
@@ -16,13 +17,21 @@ class FakeGmail:
     def get_message(self, mid):
         return next(m for m in self.messages if m["gmail_id"] == mid)
 
+    def list_unread_ids(self, days, max_total=1000):
+        return list(helpers.STATE["unread"])
+
+    def create_draft(self, raw, thread_id=None):
+        helpers.STATE["drafts"].append((raw, thread_id))
+        return {"id": "d1", "message": {"id": "mm1", "threadId": thread_id}}
+
     def get_messages(self, ids, workers=8):
         return {i: next((m for m in self.messages if m["gmail_id"] == i), None) for i in ids}
 
 
-def msg(gid, subject, sender, snippet="", body="", when="2026-10-01T10:00:00Z"):
-    return {"gmail_id": gid, "thread_id": gid, "subject": subject, "sender": sender,
-            "snippet": snippet, "body_text": body, "received_at": when}
+def msg(gid, subject, sender, snippet="", body="", when="2026-10-01T10:00:00Z", unread=0):
+    return {"gmail_id": gid, "thread_id": "t-" + gid, "subject": subject, "sender": sender,
+            "snippet": snippet, "body_text": body, "received_at": when, "is_unread": unread,
+            "message_id": f"<{gid}@mail.test>", "reply_to": ""}
 
 
 SAMPLE = [
@@ -51,12 +60,14 @@ def app():
         "GOOGLE_CLIENT_SECRET": "secret",
         "BASE_URL": "http://localhost:8000",
         "SYNC_BATCH": 3,
+        "ANTHROPIC_API_KEY": "",
     })
+    helpers.STATE.update(unread=set(), drafts=[], ai=None)
     a.extensions["gmail_factory"] = lambda cfg, refresh: FakeGmail(SAMPLE)
     db = a.extensions["jobmail_db"]
     # start every test from empty tables (matters when TEST_DATABASE_URL points at Postgres)
     c = db.connect()
-    for t in ("emails", "applications", "seen_messages", "accounts"):
+    for t in ("emails", "applications", "seen_messages", "ignored_messages", "profile", "meta", "accounts"):
         c.execute(f"DELETE FROM {t}")
     c.commit()
     c.close()
@@ -74,8 +85,10 @@ def auth_client(app):
     db = app.extensions["jobmail_db"]
     c = db.connect()
     enc = app.extensions["jobmail_cipher"].encrypt("refresh-token")
-    c.execute("INSERT INTO accounts (email, refresh_token_enc, created_at) VALUES (?,?,?)",
-              ("me@example.com", enc, "2026-10-01T00:00:00Z"))
+    c.execute("INSERT INTO accounts (email, refresh_token_enc, created_at, scope) VALUES (?,?,?,?)",
+              ("me@example.com", enc, "2026-10-01T00:00:00Z",
+               "openid email https://www.googleapis.com/auth/gmail.readonly "
+               "https://www.googleapis.com/auth/gmail.compose"))
     c.commit()
     c.close()
     cl = app.test_client()
