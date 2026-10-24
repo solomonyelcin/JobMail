@@ -8,6 +8,7 @@ from .api import bp
 from .config import load_config
 from .crypto import TokenCipher
 from .db import Database
+from .sync import ensure_classifier_current
 from . import gmail as gmail_mod
 
 
@@ -28,6 +29,7 @@ def create_app(overrides=None):
 
     db = Database(app.config["DATABASE_URL"])
     db.init_schema()
+    ensure_classifier_current(db)
     app.extensions["jobmail_db"] = db
     app.extensions["jobmail_cipher"] = TokenCipher(app.config["TOKEN_ENCRYPTION_KEY"])
     app.extensions["gmail_factory"] = default_gmail_factory

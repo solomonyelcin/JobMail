@@ -26,9 +26,14 @@ RULES = [
         r"will not be proceeding", r"unable to offer you",
     ]),
     ("interview", [
-        r"\binterview", r"phone screen", r"schedule a (?:call|chat|time)",
+        r"interview (?:invitation|invite|schedule|scheduled|scheduling|confirmation|confirmed|slot|round|"
+        r"request|availability|details|reminder|link|call)",
+        r"(?:invite|inviting) you (?:to|for) (?:an? |the )?(?:\w+ )?interview",
+        r"(?:schedule|scheduling|reschedule|book) (?:an |your |the |a )?(?:\w+ )?interview",
+        r"your (?:upcoming |scheduled )?interview", r"(?:technical|hr|video|onsite|virtual) interview",
+        r"phone screen", r"screening call", r"schedule a (?:call|chat|time)",
         r"meet with (?:our|the) team", r"invite you to (?:a |an )?(?:call|chat|meeting|discuss)",
-        r"availability for a (?:call|chat)",
+        r"availability for a (?:call|chat)", r"next round",
     ]),
     ("assessment", [
         r"assessment", r"coding challenge", r"take-?home", r"hackerrank", r"codility",
@@ -48,9 +53,18 @@ RULES = [
 ]
 _COMPILED = [(cat, [re.compile(p, re.I) for p in pats]) for cat, pats in RULES]
 
+# Learning-platform / newsletter subjects that mention interviews or assessments without being one.
+MARKETING = re.compile(
+    r"interview (?:prep|preparation|questions|tips|course|kit|guide|series|mastery)|crack(?:ing)? (?:the )?"
+    r"(?:coding )?interview|\bmaster(?:ing)?\b|webinar|newsletter|% off|discount|\bcourse\b|bootcamp|"
+    r"\benroll|free (?:skill )?assessment|learn |tutorial|roadmap|cheat ?sheet|\bblog\b",
+    re.I,
+)
+MARKETING_SENSITIVE = {"interview", "assessment"}
+
 NOISE_NAME_WORDS = re.compile(
     r"\b(careers?|recruit(?:ing|ment|ers?)|talent|acquisition|hr|human resources|jobs?|team|"
-    r"no-?reply|notifications?|hiring|people|staffing|via .*|mailer|updates?|alerts?)\b",
+    r"no-?reply|notifications?|hiring|people|staffing|mailer|updates?|alerts?)\b|\bvia\b.*",
     re.I,
 )
 GENERIC_DOMAINS = {
@@ -78,7 +92,10 @@ def classify(subject: str, snippet: str, body: str):
     """Return the category for a message, or None if it does not look job related."""
     subject = subject or ""
     text = f"{subject}\n{snippet or ''}\n{(body or '')[:2000]}"
+    marketing = bool(MARKETING.search(subject))
     for cat, patterns in _COMPILED:
+        if marketing and cat in MARKETING_SENSITIVE:
+            continue
         for p in patterns:
             if p.search(subject) or p.search(text):
                 return cat
@@ -88,8 +105,17 @@ def classify(subject: str, snippet: str, body: str):
 def _clean_name(name: str) -> str:
     name = re.sub(r"[\"<>]", "", name or "")
     name = NOISE_NAME_WORDS.sub(" ", name)
-    name = re.sub(r"[\s\-–|,:]+$", "", re.sub(r"\s+", " ", name)).strip(" -–|,:")
-    return name
+    return re.sub(r"\s+", " ", name).strip(" -–|,:")
+
+
+def _company_from_name(name: str) -> str:
+    cleaned = _clean_name(name)
+    # "Zach at Educative" / "Priya from Acme" / "Careers at Google" -> the company part
+    m = re.match(r"^(?:.*\s)?(?:at|from|@)\s+(.+)$", cleaned, re.I)
+    if m:
+        cleaned = m.group(1).strip()
+    cleaned = re.sub(r"^the\s+", "", cleaned, flags=re.I)
+    return cleaned
 
 
 def parse_sender(raw: str):
@@ -102,7 +128,7 @@ def parse_sender(raw: str):
 
 def extract_company(sender_raw: str, subject: str) -> str:
     name, addr = parse_sender(sender_raw)
-    cleaned = _clean_name(name)
+    cleaned = _company_from_name(name)
     if cleaned and cleaned.lower() not in GENERIC_NAMES and len(cleaned) <= 40:
         return cleaned
     m = SUBJECT_COMPANY.search(subject or "")

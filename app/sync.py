@@ -2,8 +2,6 @@
 import re
 from datetime import datetime, timezone
 
-import requests
-
 from .classify import STATUS_BY_CATEGORY, classify, extract_company, extract_role
 from .gmail import build_query
 
@@ -57,15 +55,14 @@ def run_sync(db, gmail, days, batch):
         new_ids = [i for i in ids if i not in seen]
         todo, remaining = new_ids[:batch], max(0, len(new_ids) - batch)
 
+        fetched = gmail.get_messages(todo)
         messages = []
         for mid in todo:
-            try:
-                messages.append(gmail.get_message(mid))
-            except requests.HTTPError as exc:
-                if exc.response is not None and exc.response.status_code == 404:
-                    conn.execute("INSERT INTO seen_messages (gmail_id) VALUES (?) ON CONFLICT DO NOTHING", (mid,))
-                    continue
-                raise
+            m = fetched.get(mid)
+            if m is None:  # deleted in Gmail since listing
+                conn.execute("INSERT INTO seen_messages (gmail_id) VALUES (?) ON CONFLICT DO NOTHING", (mid,))
+            else:
+                messages.append(m)
         messages.sort(key=lambda m: m["received_at"])
 
         stored = 0
@@ -99,3 +96,58 @@ def run_sync(db, gmail, days, batch):
 def _addr(sender):
     m = re.search(r"<([^>]+)>", sender or "")
     return (m.group(1) if m else (sender or "")).strip().lower()
+
+
+CLASSIFIER_VERSION = "2"
+
+
+def reclassify_all(db):
+    """Re-run classification on stored emails and rebuild automatic applications.
+
+    Applications whose status the user edited (status_locked) and manual ones are kept.
+    """
+    conn = db.connect()
+    try:
+        rows = conn.all("SELECT id, subject, sender, snippet, body_text, received_at FROM emails ORDER BY received_at")
+        conn.execute("UPDATE emails SET application_id=NULL")
+        conn.execute("DELETE FROM applications WHERE source='auto' AND status_locked=0")
+        for r in rows:
+            cat = classify(r["subject"], r["snippet"], r["body_text"])
+            if not cat:
+                conn.execute("DELETE FROM emails WHERE id=?", (r["id"],))
+                continue
+            company = extract_company(r["sender"], r["subject"])
+            role = extract_role(r["subject"], r["body_text"])
+            app_id = None
+            if cat in STATUS_BY_CATEGORY and company:
+                app_id = upsert_application(conn, company, role, STATUS_BY_CATEGORY[cat], r["received_at"])
+            conn.execute("UPDATE emails SET category=?, company=?, role=?, application_id=? WHERE id=?",
+                         (cat, company, role, app_id, r["id"]))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def ensure_classifier_current(db):
+    """Re-classify stored emails once whenever the rules change (CLASSIFIER_VERSION bump)."""
+    conn = db.connect()
+    try:
+        row = conn.one("SELECT value FROM meta WHERE key='classifier_version'")
+        if row and row["value"] == CLASSIFIER_VERSION:
+            return
+        has_emails = conn.one("SELECT COUNT(*) AS n FROM emails")["n"] > 0
+    finally:
+        conn.close()
+    if has_emails:
+        reclassify_all(db)
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('classifier_version', ?) "
+            "ON CONFLICT (key) DO UPDATE SET value=excluded.value", (CLASSIFIER_VERSION,))
+        conn.commit()
+    finally:
+        conn.close()

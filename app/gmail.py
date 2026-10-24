@@ -1,10 +1,13 @@
 """Minimal Gmail / Google OAuth client using plain HTTPS (no Google SDK needed)."""
 import base64
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -65,6 +68,9 @@ def build_query(days):
 class GmailClient:
     def __init__(self, access_token):
         self.h = {"Authorization": f"Bearer {access_token}"}
+        self.s = requests.Session()
+        retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503], allowed_methods=["GET"])
+        self.s.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=retry))
 
     def list_message_ids(self, query, max_total=1000):
         ids, token = [], None
@@ -72,7 +78,7 @@ class GmailClient:
             params = {"q": query, "maxResults": 100}
             if token:
                 params["pageToken"] = token
-            r = requests.get(f"{GMAIL_API}/messages", headers=self.h, params=params, timeout=TIMEOUT)
+            r = self.s.get(f"{GMAIL_API}/messages", headers=self.h, params=params, timeout=TIMEOUT)
             r.raise_for_status()
             data = r.json()
             ids += [m["id"] for m in data.get("messages", [])]
@@ -82,10 +88,23 @@ class GmailClient:
         return ids[:max_total]
 
     def get_message(self, msg_id):
-        r = requests.get(f"{GMAIL_API}/messages/{msg_id}", headers=self.h,
-                         params={"format": "full"}, timeout=TIMEOUT)
+        r = self.s.get(f"{GMAIL_API}/messages/{msg_id}", headers=self.h,
+                       params={"format": "full"}, timeout=TIMEOUT)
         r.raise_for_status()
         return parse_message(r.json())
+
+    def get_messages(self, ids, workers=8):
+        """Fetch many messages in parallel. Returns {id: message or None (if deleted)}."""
+        def one(mid):
+            try:
+                return mid, self.get_message(mid)
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 404:
+                    return mid, None
+                raise
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return dict(pool.map(one, ids))
 
 
 def _decode(data):

@@ -1,9 +1,12 @@
 """HTTP routes: Google sign-in, sync, search, application tracking."""
+import csv
+import io
 import secrets
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import requests
-from flask import Blueprint, current_app, g, jsonify, redirect, request, session
+from flask import Blueprint, Response, current_app, g, jsonify, redirect, request, session
 
 from . import gmail
 from .sync import now_iso, norm, run_sync
@@ -131,6 +134,13 @@ def sync():
         return jsonify(error="reauth"), 401
     body = request.get_json(silent=True) or {}
     days = max(1, min(int(body.get("days", cfg("SYNC_DAYS"))), 730))
+    if "days" not in body and not body.get("full") and acct["last_sync_at"]:
+        # incremental sync: only look back to just before the previous successful sync (fast)
+        try:
+            last = datetime.strptime(acct["last_sync_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            days = min(days, max(2, (datetime.now(timezone.utc) - last).days + 2))
+        except ValueError:
+            pass
     try:
         refresh = current_app.extensions["jobmail_cipher"].decrypt(acct["refresh_token_enc"])
         client = current_app.extensions["gmail_factory"](cfg, refresh)
@@ -197,7 +207,23 @@ def get_email(email_id):
     return (jsonify(row), 200) if row else (jsonify(error="not_found"), 404)
 
 
+@bp.delete("/api/emails/<int:email_id>")
+@login_required
+def delete_email(email_id):
+    """Remove a wrongly classified email. Its Gmail id stays in seen_messages so it is not re-imported."""
+    c = conn()
+    c.execute("DELETE FROM emails WHERE id=?", (email_id,))
+    c.commit()
+    return jsonify(ok=True)
+
+
 # ---------- applications ----------
+SORTS = {
+    "recent": "a.last_activity_at DESC",
+    "company": "LOWER(a.company) ASC",
+    "status": "CASE a.status WHEN 'offer' THEN 0 WHEN 'interview' THEN 1 WHEN 'assessment' THEN 2"
+              " WHEN 'applied' THEN 3 WHEN 'saved' THEN 4 WHEN 'rejected' THEN 5 ELSE 6 END, a.last_activity_at DESC",
+}
 APP_SELECT = (
     "SELECT a.id, a.company, a.role, a.status, a.notes, a.source, a.first_seen_at, a.last_activity_at,"
     " (SELECT COUNT(*) FROM emails e WHERE e.application_id=a.id) AS email_count FROM applications a"
@@ -215,8 +241,40 @@ def list_applications():
     if request.args.get("status") in STATUSES:
         where.append("a.status=?")
         params.append(request.args["status"])
-    rows = conn().all(f"{APP_SELECT} WHERE {' AND '.join(where)} ORDER BY a.last_activity_at DESC", params)
+    order = SORTS.get(request.args.get("sort", "recent"), SORTS["recent"])
+    rows = conn().all(f"{APP_SELECT} WHERE {' AND '.join(where)} ORDER BY {order}", params)
     return jsonify(items=rows)
+
+
+@bp.get("/api/applications/<int:app_id>")
+@login_required
+def get_application(app_id):
+    row = conn().one(f"{APP_SELECT} WHERE a.id=?", (app_id,))
+    if not row:
+        return jsonify(error="not_found"), 404
+    row["emails"] = conn().all(
+        "SELECT id, subject, sender, snippet, received_at, category FROM emails"
+        " WHERE application_id=? ORDER BY received_at DESC", (app_id,))
+    return jsonify(row)
+
+
+def _csv_safe(v):
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
+@bp.get("/api/export.csv")
+@login_required
+def export_csv():
+    rows = conn().all(f"{APP_SELECT} ORDER BY a.last_activity_at DESC")
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Company", "Role", "Status", "Emails", "First seen", "Last activity", "Notes"])
+    for r in rows:
+        w.writerow([_csv_safe(r["company"]), _csv_safe(r["role"]), r["status"], r["email_count"],
+                    r["first_seen_at"], r["last_activity_at"], _csv_safe(r["notes"])])
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=jobmail-applications.csv"})
 
 
 @bp.post("/api/applications")
@@ -298,5 +356,24 @@ def stats():
     c = conn()
     apps = {r["status"]: r["n"] for r in c.all("SELECT status, COUNT(*) AS n FROM applications GROUP BY status")}
     cats = {r["category"]: r["n"] for r in c.all("SELECT category, COUNT(*) AS n FROM emails GROUP BY category")}
+
+    now = datetime.now(timezone.utc)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(weeks=7)
+    buckets = [0] * 8
+    for r in c.all("SELECT received_at FROM emails WHERE received_at >= ?", (start.strftime(fmt),)):
+        try:
+            idx = (datetime.strptime(r["received_at"], fmt).replace(tzinfo=timezone.utc) - start).days // 7
+        except ValueError:
+            continue
+        if 0 <= idx < 8:
+            buckets[idx] += 1
+    weekly = [{"week_start": (start + timedelta(weeks=i)).strftime("%Y-%m-%d"), "count": n}
+              for i, n in enumerate(buckets)]
+
+    stale_cutoff = (now - timedelta(days=14)).strftime(fmt)
+    stale = c.one(
+        "SELECT COUNT(*) AS n FROM applications WHERE status IN ('applied','assessment','interview')"
+        " AND last_activity_at < ?", (stale_cutoff,))["n"]
     return jsonify(applications=apps, emails=cats, total_emails=sum(cats.values()),
-                   total_applications=sum(apps.values()))
+                   total_applications=sum(apps.values()), weekly=weekly, stale=stale)

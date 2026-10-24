@@ -2,60 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JobMail</title>
-  <meta name="theme-color" content="#1f3a5f">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="top">
-    <h1>JobMail</h1>
-    <div id="userbar" class="userbar hidden">
-      <span id="syncinfo" class="muted"></span>
-      <button id="syncBtn" class="primary">Sync Gmail</button>
-      <button id="logoutBtn">Sign out</button>
+  <header class="topbar">
+    <div class="brand"><span class="logo" aria-hidden="true">✉</span><h1>JobMail</h1></div>
+    <div id="userbar" class="topbar-actions hidden">
+      <div id="syncPill" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="syncText">Not synced</span></div>
+      <button id="syncBtn" class="btn ghost" title="Sync Gmail now"><span aria-hidden="true">↻</span><span class="lbl"> Sync</span></button>
+      <a id="exportBtn" class="btn ghost" href="/api/export.csv" title="Download applications as CSV"><span aria-hidden="true">⇩</span><span class="lbl"> CSV</span></a>
+      <button id="themeBtn" class="btn ghost icon" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+      <button id="logoutBtn" class="btn ghost" title="Sign out"><span class="lbl">Sign out</span><span class="only-mobile" aria-hidden="true">⎋</span></button>
     </div>
   </header>
 
   <main>
-    <section id="login" class="card center hidden">
-      <h2>Track your job search from Gmail</h2>
-      <p class="muted">JobMail reads your mailbox (read-only) and keeps only job-related emails: applications, interviews, offers, rejections and openings.</p>
-      <p id="loginError" class="error hidden"></p>
-      <a class="button primary" href="/auth/login">Sign in with Google</a>
+    <section id="login" class="hero hidden">
+      <div class="hero-card">
+        <div class="logo big" aria-hidden="true">✉</div>
+        <h2>Your job search, organised automatically</h2>
+        <p class="muted">JobMail reads your Gmail (read-only), keeps only job-related emails, and tracks every application from applied to offer.</p>
+        <ul class="features">
+          <li>Automatic sync, no button needed</li>
+          <li>Kanban board with drag and drop</li>
+          <li>Search, filters and CSV export</li>
+        </ul>
+        <p id="loginError" class="error hidden"></p>
+        <a class="btn primary large" href="/auth/login">Sign in with Google</a>
+      </div>
     </section>
 
     <section id="app" class="hidden">
-      <div id="stats" class="stats"></div>
-      <p id="syncMsg" class="muted"></p>
+      <div id="funnel" class="funnel" aria-label="Pipeline"></div>
+      <div id="insights" class="insights"></div>
 
-      <nav class="tabs">
-        <button id="tabApps" class="tab active">Applications</button>
-        <button id="tabEmails" class="tab">Emails</button>
-      </nav>
-
-      <div id="appsView">
-        <div class="filters">
-          <input id="appQ" type="search" placeholder="Search company, role, notes">
-          <select id="appStatus"><option value="">All statuses</option></select>
-          <button id="addBtn">+ Add</button>
+      <div class="toolbar">
+        <div class="seg" role="tablist" aria-label="View">
+          <button id="viewBoard" class="seg-btn active" role="tab">Board</button>
+          <button id="viewList" class="seg-btn" role="tab">List</button>
+          <button id="viewEmails" class="seg-btn" role="tab">Emails</button>
         </div>
-        <div id="appList" class="list"></div>
+        <div class="search">
+          <span aria-hidden="true">⌕</span>
+          <input id="q" type="search" placeholder="Search…  ( press / )" autocomplete="off">
+        </div>
+        <select id="sort" aria-label="Sort applications">
+          <option value="recent">Latest activity</option>
+          <option value="status">Status</option>
+          <option value="company">Company A–Z</option>
+        </select>
+        <button id="addBtn" class="btn primary"><span aria-hidden="true">＋</span><span class="lbl"> Add</span></button>
       </div>
 
+      <div id="boardView" class="board"></div>
+      <div id="listView" class="list hidden"></div>
+
       <div id="emailsView" class="hidden">
-        <div class="filters">
-          <input id="emailQ" type="search" placeholder="Search subject, sender, text">
-          <select id="emailCat"><option value="">All categories</option></select>
-          <select id="emailStatus"><option value="">Any application status</option></select>
-          <input id="emailFrom" type="date" aria-label="From date">
-          <input id="emailTo" type="date" aria-label="To date">
+        <div class="email-filters">
+          <div id="catChips" class="chips" aria-label="Category"></div>
+          <div class="dates">
+            <label>From <input id="emailFrom" type="date"></label>
+            <label>To <input id="emailTo" type="date"></label>
+          </div>
         </div>
         <div id="emailList" class="list"></div>
-        <button id="moreBtn" class="hidden">Load more</button>
+        <button id="moreBtn" class="btn hidden">Load more</button>
       </div>
     </section>
   </main>
+
+  <div id="drawerBackdrop" class="backdrop hidden"></div>
+  <aside id="drawer" class="drawer" aria-hidden="true" aria-label="Application details">
+    <div id="drawerBody"></div>
+  </aside>
 
   <dialog id="dlg">
     <form id="dlgForm" method="dialog">
@@ -66,14 +89,14 @@
       <label>Notes <textarea id="fNotes" rows="4" maxlength="2000"></textarea></label>
       <p id="dlgError" class="error hidden"></p>
       <div class="row">
-        <button type="button" id="dlgDelete" class="danger hidden">Delete</button>
         <span class="spacer"></span>
-        <button type="button" id="dlgCancel">Cancel</button>
-        <button type="submit" class="primary">Save</button>
+        <button type="button" id="dlgCancel" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>
 
+  <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

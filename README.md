@@ -5,10 +5,13 @@ A personal web app that reads your Gmail (read-only), keeps **only job-related e
 ## Features
 
 - **Gmail sign-in** with Google OAuth. Only the one account in `ALLOWED_EMAIL` can log in.
-- **Sync**: pulls recent job-related messages (applications, interviews, assessments, offers, rejections, job alerts). Unrelated mail is never stored.
-- **Classification**: `applied`, `assessment`, `interview`, `offer`, `rejected`, `opening` (rule based, see `app/classify.py`).
-- **Application tracking**: company and role are extracted automatically; status follows the latest email. You can edit, add, or delete applications manually. A manual status change is never overwritten by later syncs.
-- **Search and filters**: free text, category, application status, company, date range.
+- **Automatic sync**: runs when you open the app, when you return to the tab, and every 5 minutes while it is open. After the first full sync, later syncs only look back to just before the previous one, and messages are fetched in parallel, so they are quick. A manual **Sync** button is still there.
+- **Classification**: `applied`, `assessment`, `interview`, `offer`, `rejected`, `opening` (rule based, see `app/classify.py`). Newsletters and course promotions that merely mention interviews are filtered out. When the rules change, stored emails are re-classified automatically on the next start.
+- **Application tracking**: company and role are extracted automatically; status follows the latest email. Manual status edits are never overwritten by later syncs.
+- **Kanban board** with drag and drop, plus a list view, a detail drawer with notes and an email timeline, and a "needs follow-up" nudge for applications quiet for 14+ days.
+- **Search and filters**: highlighted free-text search, category chips, application status, date range, sorting.
+- **Insights**: pipeline funnel, response rate, weekly email activity.
+- **Tools**: CSV export, "Not job-related" to remove a wrongly captured email, dark mode, keyboard shortcut `/` to search, works on phones.
 - **Security**: refresh token encrypted at rest (Fernet), signed session cookies, HTTPS-only cookies in production, strict CSP, CSRF header on all writes, no CORS (frontend and API share one origin).
 
 ## Architecture

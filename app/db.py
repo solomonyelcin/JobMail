@@ -107,6 +107,7 @@ class Database:
                 application_id INTEGER REFERENCES applications(id) ON DELETE SET NULL
             )""",
             "CREATE TABLE IF NOT EXISTS seen_messages (gmail_id TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS idx_emails_received ON emails (received_at)",
             "CREATE INDEX IF NOT EXISTS idx_emails_category ON emails (category)",
             "CREATE INDEX IF NOT EXISTS idx_emails_app ON emails (application_id)",

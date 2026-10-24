@@ -12,6 +12,10 @@ from app.classify import classify, extract_company, extract_role, parse_sender
     ("New jobs for you", "job alert", "opening"),
     ("Your order has shipped", "Track your package", None),
     ("Weekly newsletter", "Top 10 recipes", None),
+    ("Crack the coding interview: free course", "interview prep roadmap", None),
+    ("Master system design interview questions", "weekly digest", None),
+    ("Interview invitation - Backend Engineer", "", "interview"),
+    ("Your interview with Acme is scheduled", "", "interview"),
 ])
 def test_classify(subject, snippet, expected):
     assert classify(subject, snippet, "") == expected
@@ -32,6 +36,10 @@ def test_parse_sender():
     ("Acme via Greenhouse <no-reply@greenhouse.io>", "x", "Acme"),
     ("jobs@initech.com", "Your application", "Initech"),
     ("LinkedIn <jobs@linkedin.com>", "Your application to Hooli", "Hooli"),
+    ("Zach at Educative <zach@educative.io>", "x", "Educative"),
+    ("The Educative Team <team@educative.io>", "x", "Educative"),
+    ("Careers at Google <careers@google.com>", "x", "Google"),
+    ("Priya from Tata Consultancy Services <hr@tcs.com>", "x", "Tata Consultancy Services"),
 ])
 def test_extract_company(sender, subject, expected):
     assert extract_company(sender, subject) == expected

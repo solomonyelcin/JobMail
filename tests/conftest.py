@@ -16,6 +16,9 @@ class FakeGmail:
     def get_message(self, mid):
         return next(m for m in self.messages if m["gmail_id"] == mid)
 
+    def get_messages(self, ids, workers=8):
+        return {i: next((m for m in self.messages if m["gmail_id"] == i), None) for i in ids}
+
 
 def msg(gid, subject, sender, snippet="", body="", when="2026-10-01T10:00:00Z"):
     return {"gmail_id": gid, "thread_id": gid, "subject": subject, "sender": sender,
