@@ -152,8 +152,10 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
         spec = OPENAI_STYLE[p]
         url = spec[1]
         headers = {"Authorization": "Bearer " + cfg(spec[0]), "content-type": "application/json"}
-        payload = {"model": model, "max_tokens": max_tokens + (800 if p == "gemini" else 0),
+        payload = {"model": model, "max_tokens": max_tokens + (1500 if p == "gemini" else 0),
                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if p == "gemini":  # newer Gemini models "think" for a long time by default; keep answers fast
+            payload["reasoning_effort"] = "low"
     else:
         url = API_URL
         headers = {"x-api-key": cfg("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json"}
@@ -163,7 +165,7 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
     tried_discovery = False
     for attempt in range(3):
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            r = requests.post(url, headers=headers, json=payload, timeout=45)
         except requests.RequestException as exc:
             last = AIError("network", exc.__class__.__name__)
             time.sleep(1.0 * (attempt + 1))
@@ -177,6 +179,9 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
                     raise AIError("bad_reply", "no choices in reply")
             return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         err = _error_from_response(r)
+        if err.kind == "bad_request" and "reasoning_effort" in payload:
+            payload.pop("reasoning_effort")  # this model does not accept the option: retry without it
+            continue
         if err.kind == "model" and p == "gemini" and not tried_discovery:
             tried_discovery = True
             found = discover_gemini_model(cfg("GEMINI_API_KEY"))

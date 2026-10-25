@@ -327,3 +327,23 @@ def test_gemini_model_autodiscovery(app, monkeypatch):
     assert calls == ["gemini-2.5-flash", "gemini-3.8-flash"]
     assert ai.model_for(cfg, "compose") == "gemini-3.8-flash"
     ai._GEMINI_PICK.clear()
+
+
+def test_gemini_drops_reasoning_option_if_rejected(app, monkeypatch):
+    from app import ai
+    ai._GEMINI_PICK.clear()
+    app.config["GEMINI_API_KEY"] = "g3"
+    cfg = lambda k: app.config.get(k, "")
+    sent = []
+
+    class R:
+        def __init__(self, code, body): self.status_code, self._b = code, body
+        def json(self): return self._b
+
+    def post(url, headers, json, timeout):
+        sent.append("reasoning_effort" in json)
+        if "reasoning_effort" in json:
+            return R(400, {"error": {"message": "Unknown field reasoning_effort"}})
+        return R(200, {"choices": [{"message": {"content": "OK"}}]})
+    monkeypatch.setattr(ai.requests, "post", post)
+    assert ai.complete(cfg, "s", "u", "gemini-x") == "OK" and sent == [True, False]
