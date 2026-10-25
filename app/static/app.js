@@ -714,7 +714,7 @@ async function testAI() {
   try {
     const r = await api("POST", "/api/ai/test", {});
     box.replaceChildren();
-    r.results.forEach((x) => box.append(el("div", "test-line " + (x.ok ? "ok" : "bad"), x.ok ? `✓ ${x.model}: working` : `✗ ${x.model}: ${x.help || "failed"}`)));
+    r.results.forEach((x) => box.append(el("div", "test-line " + (x.ok ? "ok" : "bad"), x.ok ? `✓ ${x.model}: working` : `✗ ${x.model}: ${x.help || "failed"}${x.detail ? " (" + x.detail + ")" : ""}`)));
     if (r.ok) { S.aiWarned = {}; toast("AI connection works", "ok"); loadStats(); runAnalysis(); }
   } catch (e) { box.replaceChildren(el("div", "test-line bad", e.data && e.data.error === "ai_disabled" ? "AI is not enabled on the server." : "Test failed: " + e.message)); }
   finally { btn.disabled = false; }

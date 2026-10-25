@@ -26,6 +26,35 @@ SETTING_KEYS = ("AI_PROVIDER", "AI_MODEL", "AI_COMPOSE_MODEL", "ANTHROPIC_API_KE
                 "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 
 
+_GEMINI_PICK = {}
+
+
+def discover_gemini_model(key: str) -> str:
+    """Ask Google which models this key can use and pick the newest plain "flash" one.
+
+    Model names change over time, so a hard-coded default can stop working; this keeps Gemini self-healing.
+    """
+    if key in _GEMINI_PICK:
+        return _GEMINI_PICK[key]
+    try:
+        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+                         headers={"x-goog-api-key": key}, timeout=30)
+        items = r.json().get("models", []) if r.status_code == 200 else []
+    except (requests.RequestException, ValueError):
+        items = []
+    best, best_v = "", (-1.0,)
+    for m in items:
+        name = str(m.get("name", "")).split("/")[-1]
+        hit = re.fullmatch(r"gemini-(\d+(?:\.\d+)?)-flash", name)
+        if hit and "generateContent" in (m.get("supportedGenerationMethods") or ["generateContent"]):
+            v = (float(hit.group(1)),)
+            if v > best_v:
+                best, best_v = name, v
+    if best:
+        _GEMINI_PICK[key] = best
+    return best
+
+
 def provider(cfg) -> str:
     """The AI provider in use: AI_PROVIDER if set, else the first one that has a key (free ones first)."""
     want = (cfg("AI_PROVIDER") or "").strip().lower()
@@ -48,6 +77,8 @@ def model_for(cfg, role: str) -> str:
     if explicit:
         return explicit
     p = provider(cfg)
+    if p == "gemini" and _GEMINI_PICK.get(cfg("GEMINI_API_KEY")):
+        return _GEMINI_PICK[cfg("GEMINI_API_KEY")]
     i = 0 if role == "analyze" else 1
     return OPENAI_STYLE[p][2 + i] if p in OPENAI_STYLE else ANTHROPIC_DEFAULTS[i]
 CATEGORIES = ("applied", "assessment", "interview", "offer", "rejected", "opening", "recruiter")
@@ -129,6 +160,7 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
         payload = {"model": model, "max_tokens": max_tokens, "system": system,
                    "messages": [{"role": "user", "content": user}]}
     last = None
+    tried_discovery = False
     for attempt in range(3):
         try:
             r = requests.post(url, headers=headers, json=payload, timeout=60)
@@ -145,6 +177,12 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
                     raise AIError("bad_reply", "no choices in reply")
             return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         err = _error_from_response(r)
+        if err.kind == "model" and p == "gemini" and not tried_discovery:
+            tried_discovery = True
+            found = discover_gemini_model(cfg("GEMINI_API_KEY"))
+            if found and found != payload["model"]:
+                payload["model"] = found
+                continue
         if err.kind in ("rate_limit", "overloaded") and attempt < 2:
             last = err
             time.sleep(1.5 * (attempt + 1))
@@ -178,7 +216,7 @@ def check_models(cfg):
             complete(cfg, "Reply with the single word OK.", "ping", model, 5)
             out.append({"model": model, "ok": True, "kind": "", "help": ""})
         except AIError as exc:
-            out.append({"model": model, "ok": False, "kind": exc.kind, "help": help_text(exc.kind, cfg)})
+            out.append({"model": model, "ok": False, "kind": exc.kind, "help": help_text(exc.kind, cfg), "detail": exc.detail})
     return out
 
 

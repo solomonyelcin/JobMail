@@ -299,3 +299,31 @@ def test_gemini_provider_free_path(app, monkeypatch):
     assert ai.complete(cfg, "s", "u", "gemini-2.5-flash") == "OK"
     assert "generativelanguage" in seen["url"] and seen["auth"] == "Bearer g-key"
     assert "Google Gemini" in ai.help_text("billing", cfg)
+
+
+def test_gemini_model_autodiscovery(app, monkeypatch):
+    from app import ai
+    ai._GEMINI_PICK.clear()
+    app.config["GEMINI_API_KEY"] = "g2"
+    cfg = lambda k: app.config.get(k, "")
+    calls = []
+
+    class R:
+        def __init__(self, code, body): self.status_code, self._b = code, body
+        def json(self): return self._b
+
+    def post(url, headers, json, timeout):
+        calls.append(json["model"])
+        if json["model"] == "gemini-2.5-flash":
+            return R(404, {"error": {"message": "models/gemini-2.5-flash is not found"}})
+        return R(200, {"choices": [{"message": {"content": "OK"}}]})
+
+    def get(url, headers, timeout):
+        return R(200, {"models": [{"name": "models/gemini-3.8-flash"}, {"name": "models/gemini-3.8-flash-lite"},
+                                  {"name": "models/gemini-3.5-flash"}, {"name": "models/gemini-3.8-pro"}]})
+    monkeypatch.setattr(ai.requests, "post", post)
+    monkeypatch.setattr(ai.requests, "get", get)
+    assert ai.complete(cfg, "s", "u", ai.model_for(cfg, "analyze")) == "OK"
+    assert calls == ["gemini-2.5-flash", "gemini-3.8-flash"]
+    assert ai.model_for(cfg, "compose") == "gemini-3.8-flash"
+    ai._GEMINI_PICK.clear()
