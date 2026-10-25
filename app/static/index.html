@@ -4,120 +4,186 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JobMail</title>
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#0b57d0">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="logo" aria-hidden="true">✉</span><h1>JobMail</h1></div>
-    <div id="userbar" class="topbar-actions hidden">
-      <div id="syncPill" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="syncText">Not synced</span></div>
-      <button id="syncBtn" class="btn ghost" title="Sync Gmail now"><span aria-hidden="true">↻</span><span class="lbl"> Sync</span></button>
-      <a id="exportBtn" class="btn ghost" href="/api/export.csv" title="Download applications as CSV"><span aria-hidden="true">⇩</span><span class="lbl"> CSV</span></a>
-      <button id="themeBtn" class="btn ghost icon" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
-      <button id="logoutBtn" class="btn ghost" title="Sign out"><span class="lbl">Sign out</span><span class="only-mobile" aria-hidden="true">⎋</span></button>
+  <!-- ============ signed-out screen ============ -->
+  <section id="login" class="hero hidden">
+    <div class="hero-card">
+      <div class="logo big" data-icon="mail"></div>
+      <h2>Your job search, organised automatically</h2>
+      <p class="muted">JobMail reads your Gmail, keeps only job-related emails from the last 3 months, and tracks every application from applied to offer. It only creates reply drafts when you ask, and never sends anything itself.</p>
+      <ul class="features">
+        <li>A Gmail-style inbox just for job emails</li>
+        <li>AI that spots the best-fit jobs and drafts replies</li>
+        <li>Kanban board, search, filters and CSV export</li>
+      </ul>
+      <p id="loginError" class="error hidden"></p>
+      <a class="btn primary large" href="/auth/login">Sign in with Google</a>
     </div>
-  </header>
+  </section>
 
-  <main>
-    <section id="login" class="hero hidden">
-      <div class="hero-card">
-        <div class="logo big" aria-hidden="true">✉</div>
-        <h2>Your job search, organised automatically</h2>
-        <p class="muted">JobMail reads your Gmail, keeps only job-related emails from the last 3 months, and tracks every application from applied to offer. It only creates reply drafts when you ask, and never sends anything itself.</p>
-        <ul class="features">
-          <li>Automatic sync, no button needed</li>
-          <li>Kanban board with drag and drop</li>
-          <li>AI that spots the best-fit jobs and drafts replies</li>
-          <li>Search, filters and CSV export</li>
-        </ul>
-        <p id="loginError" class="error hidden"></p>
-        <a class="btn primary large" href="/auth/login">Sign in with Google</a>
+  <!-- ============ app ============ -->
+  <div id="appShell" class="hidden">
+    <header class="topbar">
+      <button id="menuBtn" class="icon-btn" aria-label="Toggle sidebar" title="Menu"><span data-icon="menu"></span></button>
+      <div class="brand"><span class="logo" data-icon="mail"></span><span class="brand-name">JobMail</span></div>
+      <div class="search" id="searchBox">
+        <span data-icon="search"></span>
+        <input id="q" type="search" placeholder="Search job emails…" autocomplete="off" aria-label="Search">
       </div>
-    </section>
+      <div class="topbar-actions" id="userbar">
+        <div id="syncPill" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="syncText">Not synced</span></div>
+        <button id="syncBtn" class="icon-btn" title="Sync Gmail now" aria-label="Sync Gmail now"><span data-icon="refresh"></span></button>
+        <button id="exportBtn" class="icon-btn" title="Download applications as CSV" aria-label="Download CSV"><span data-icon="download"></span></button>
+        <button id="themeBtn" class="icon-btn" title="Theme and density" aria-label="Theme and density" aria-haspopup="true"><span data-icon="palette"></span></button>
+        <button id="tourBtn" class="btn tonal" title="Take a quick tour"><span data-icon="help"></span><span class="lbl">Tour</span></button>
+        <button id="logoutBtn" class="btn" title="Sign out"><span data-icon="logout"></span><span class="lbl">Sign out</span></button>
+      </div>
+    </header>
 
-    <section id="app" class="hidden">
-      <div id="funnel" class="funnel" aria-label="Pipeline"></div>
-      <div id="insights" class="insights"></div>
+    <div id="themePop" class="popover hidden" role="dialog" aria-label="Theme and density">
+      <h4>Theme</h4>
+      <div id="swatches" class="swatches"></div>
+      <h4>Display density</h4>
+      <div id="densityRow" class="density"></div>
+    </div>
 
-      <div class="toolbar">
-        <div class="seg" role="tablist" aria-label="View">
-          <button id="viewBoard" class="seg-btn active" role="tab">Board</button>
-          <button id="viewList" class="seg-btn" role="tab">List</button>
-          <button id="viewEmails" class="seg-btn" role="tab">Emails <span id="unreadBadge" class="count-badge hidden"></span></button>
-          <button id="viewMatches" class="seg-btn" role="tab">Best matches</button>
-          <button id="viewProfile" class="seg-btn" role="tab">Profile</button>
+    <div class="shell">
+      <nav id="sidebar" class="sidebar" aria-label="Main">
+        <button id="addBtn" class="compose-btn"><span data-icon="plus"></span><span class="nl">Add application</span></button>
+        <div id="sidebarNav" class="nav">
+          <button class="nav-item" data-view="dashboard"><span data-icon="dashboard"></span><span class="nl">Dashboard</span></button>
+          <button class="nav-item" data-view="inbox"><span data-icon="inbox"></span><span class="nl">Inbox</span><span class="count" id="cInbox"></span></button>
+          <button class="nav-item" data-view="unread"><span data-icon="mail"></span><span class="nl">Unread</span><span class="count" id="cUnread"></span></button>
+          <button class="nav-item" data-view="matches"><span data-icon="star"></span><span class="nl">Best matches</span><span class="count" id="cMatches"></span></button>
+          <button class="nav-item" data-view="board"><span data-icon="board"></span><span class="nl">Board</span><span class="count" id="cBoard"></span></button>
+          <button class="nav-item" data-view="list"><span data-icon="list"></span><span class="nl">Applications</span></button>
         </div>
-        <div class="search" id="searchBox">
-          <span aria-hidden="true">⌕</span>
-          <input id="q" type="search" placeholder="Search…  ( press / )" autocomplete="off">
+        <div class="nav-title">Labels</div>
+        <div id="labelNav" class="nav"></div>
+        <div class="nav-title">Account</div>
+        <div class="nav">
+          <button class="nav-item" data-view="profile"><span data-icon="user"></span><span class="nl">Profile &amp; resume</span></button>
         </div>
-        <select id="sort" aria-label="Sort applications">
-          <option value="recent">Latest activity</option>
-          <option value="status">Status</option>
-          <option value="company">Company A–Z</option>
-        </select>
-        <button id="addBtn" class="btn primary"><span aria-hidden="true">＋</span><span class="lbl"> Add</span></button>
-      </div>
+        <button id="aiChip" class="ai-chip" data-view="profile"><span data-icon="sparkle"></span><span class="nl" id="aiChipText">AI off</span></button>
+      </nav>
 
-      <div id="boardView" class="board"></div>
-      <div id="listView" class="list hidden"></div>
+      <div class="main-wrap">
+        <div class="main-card" id="mainCard">
+          <section class="content" id="content">
+            <div id="aiBanner" class="banner hidden" role="alert">
+              <span data-icon="alert"></span>
+              <div class="banner-text"><b>AI isn't working yet.</b> <span id="aiBannerText"></span></div>
+              <button id="aiBannerBtn" class="btn small">Check AI connection</button>
+            </div>
 
-      <div id="matchesView" class="hidden">
-        <p id="matchesNote" class="muted"></p>
-        <div id="matchesList" class="list"></div>
-      </div>
+            <!-- Dashboard -->
+            <div id="dashboardView" class="view">
+              <h2 class="view-title">Your job search at a glance</h2>
+              <div id="funnel" class="funnel" aria-label="Pipeline"></div>
+              <div id="insights" class="insights"></div>
+              <div class="two-col">
+                <section class="panel">
+                  <div class="panel-head"><h3>Recent emails</h3><button class="link" data-view="inbox">View all</button></div>
+                  <div id="recentList" class="rows"></div>
+                </section>
+                <section class="panel">
+                  <h3>Getting started</h3>
+                  <div id="setupList" class="setup"></div>
+                </section>
+              </div>
+            </div>
 
-      <div id="profileView" class="hidden profile">
-        <section class="panel">
-          <h3>Resume</h3>
-          <p class="muted">Attached to the reply drafts JobMail creates. PDF, DOCX or TXT, up to 2 MB.</p>
-          <div id="resumeInfo" class="muted">No resume uploaded.</div>
-          <div class="row wrap">
-            <label class="btn primary" for="resumeFile">Upload / replace</label>
-            <input id="resumeFile" type="file" accept=".pdf,.docx,.txt,.md" class="hidden">
-            <a id="resumeDownload" class="btn hidden" href="/api/resume">Download</a>
-            <button id="resumeDelete" class="btn danger hidden">Remove</button>
-          </div>
-        </section>
-        <section class="panel">
-          <h3>About you</h3>
-          <p class="muted">The AI uses this to score jobs and write replies. Add your skills, experience, target roles and preferred locations. It is filled from your resume on first upload; edit it freely.</p>
-          <label>Full name <input id="pName" maxlength="100" autocomplete="name"></label>
-          <label>Profile <textarea id="pText" rows="10" maxlength="8000" placeholder="Backend engineer, 4 years .NET and Python. Looking for senior backend roles, remote or Chennai…"></textarea></label>
-          <div class="row wrap">
-            <button id="pSave" class="btn primary">Save</button>
-            <span id="pMsg" class="muted"></span>
-          </div>
-        </section>
-        <section class="panel">
-          <h3>AI &amp; mailbox</h3>
-          <p id="aiStatus" class="muted"></p>
-          <div class="row wrap">
-            <button id="reanalyzeBtn" class="btn hidden">Re-score all emails with my latest profile</button>
-            <button id="rescanBtn" class="btn">Rescan last 3 months</button>
-            <a id="reconnectBtn" class="btn hidden" href="/auth/login">Re-connect Google (allow drafts)</a>
-          </div>
-          <p class="muted small">Rescan re-checks every message from the last 3 months, including ones skipped earlier. When AI is on, email text and your profile are sent to Anthropic's API for analysis.</p>
-        </section>
-      </div>
+            <!-- Inbox / Unread / Labels -->
+            <div id="emailsView" class="view hidden">
+              <div class="list-toolbar">
+                <h2 class="view-title" id="emailTitle">Inbox</h2>
+                <span id="emailCount" class="muted"></span>
+                <span class="spacer"></span>
+                <label class="date-field">From <input id="emailFrom" type="date"></label>
+                <label class="date-field">To <input id="emailTo" type="date"></label>
+              </div>
+              <div id="emailList" class="rows"></div>
+              <div class="more-wrap"><button id="moreBtn" class="btn hidden">Load more</button></div>
+            </div>
 
-      <div id="emailsView" class="hidden">
-        <div class="email-filters">
-          <div id="catChips" class="chips" aria-label="Category"></div>
-          <div class="dates">
-            <label>From <input id="emailFrom" type="date"></label>
-            <label>To <input id="emailTo" type="date"></label>
-          </div>
+            <!-- Best matches -->
+            <div id="matchesView" class="view hidden">
+              <h2 class="view-title">Best matches</h2>
+              <p id="matchesNote" class="muted"></p>
+              <div id="matchesList" class="match-list"></div>
+            </div>
+
+            <!-- Applications (board / list) -->
+            <div id="appsView" class="view hidden">
+              <div class="list-toolbar">
+                <h2 class="view-title" id="appsTitle">Board</h2>
+                <span class="spacer"></span>
+                <div class="seg" role="tablist" aria-label="Layout">
+                  <button id="segBoard" class="seg-btn" data-view="board"><span data-icon="board"></span><span class="lbl">Board</span></button>
+                  <button id="segList" class="seg-btn" data-view="list"><span data-icon="list"></span><span class="lbl">List</span></button>
+                </div>
+                <select id="statusFilter" aria-label="Filter by status"></select>
+                <select id="sort" aria-label="Sort applications">
+                  <option value="recent">Latest activity</option>
+                  <option value="status">Status</option>
+                  <option value="company">Company A–Z</option>
+                </select>
+              </div>
+              <div id="boardView" class="board"></div>
+              <div id="listView" class="list-wide hidden"></div>
+            </div>
+
+            <!-- Profile -->
+            <div id="profileView" class="view hidden profile">
+              <h2 class="view-title">Profile &amp; resume</h2>
+              <section class="panel">
+                <h3>Resume</h3>
+                <p class="muted">Attached to the reply drafts JobMail creates. PDF, DOCX or TXT, up to 2 MB.</p>
+                <div id="resumeInfo" class="muted">No resume uploaded.</div>
+                <div class="row wrap">
+                  <label class="btn primary" for="resumeFile">Upload / replace</label>
+                  <input id="resumeFile" type="file" accept=".pdf,.docx,.txt,.md" class="hidden">
+                  <a id="resumeDownload" class="btn hidden" href="/api/resume">Download</a>
+                  <button id="resumeDelete" class="btn danger hidden">Remove</button>
+                </div>
+              </section>
+              <section class="panel">
+                <h3>About you</h3>
+                <p class="muted">The AI uses this to score jobs and write replies. Add your skills, experience, target roles and preferred locations. It is filled from your resume on first upload; edit it freely.</p>
+                <label>Full name <input id="pName" maxlength="100" autocomplete="name"></label>
+                <label>Profile <textarea id="pText" rows="10" maxlength="8000" placeholder="Backend engineer, 4 years .NET and Python. Looking for senior backend roles, remote or Chennai…"></textarea></label>
+                <div class="row wrap">
+                  <button id="pSave" class="btn primary">Save</button>
+                  <span id="pMsg" class="muted"></span>
+                </div>
+              </section>
+              <section class="panel">
+                <h3>AI &amp; mailbox</h3>
+                <p id="aiStatus" class="muted"></p>
+                <div id="aiTestResult" class="test-result hidden"></div>
+                <div class="row wrap">
+                  <button id="aiTestBtn" class="btn hidden">Test AI connection</button>
+                  <button id="reanalyzeBtn" class="btn hidden">Re-score all emails with my latest profile</button>
+                  <button id="rescanBtn" class="btn">Rescan last 3 months</button>
+                  <a id="reconnectBtn" class="btn hidden" href="/auth/login">Re-connect Google (allow drafts)</a>
+                </div>
+                <p class="muted small">Rescan re-checks every message from the last 3 months, including ones skipped earlier. When AI is on, email text and your profile are sent to Anthropic's API for analysis.</p>
+              </section>
+            </div>
+          </section>
+
+          <!-- reading pane (docked beside the list on wide screens, a slide-over elsewhere) -->
+          <aside id="emailPane" class="epane" aria-label="Email"></aside>
         </div>
-        <div id="emailList" class="list"></div>
-        <button id="moreBtn" class="btn hidden">Load more</button>
       </div>
-    </section>
-  </main>
+    </div>
+  </div>
 
-  <div id="drawerBackdrop" class="backdrop hidden"></div>
+  <div id="backdrop" class="backdrop hidden"></div>
   <aside id="drawer" class="drawer" aria-hidden="true" aria-label="Application details">
     <div id="drawerBody"></div>
   </aside>
@@ -149,6 +215,7 @@
       <label>Instructions for a rewrite (optional) <input id="cInstr" maxlength="300" placeholder="e.g. shorter, mention I can start in 30 days"></label>
       <p id="composeWarn" class="error hidden"></p>
     </div>
+    <p id="composeError" class="error hidden"></p>
     <div id="composeDone" class="hidden">
       <p>Draft created in your Gmail. Review it there and press send.</p>
       <a id="composeLink" class="btn primary" target="_blank" rel="noopener noreferrer">Open draft in Gmail</a>
@@ -160,6 +227,24 @@
       <button id="cCreate" class="btn primary hidden">Create Gmail draft</button>
     </div>
   </dialog>
+
+  <!-- guided tour -->
+  <div id="tour" class="tour hidden" aria-live="polite">
+    <div id="tourBlock" class="tour-block"></div>
+    <div id="tourHole" class="tour-hole"></div>
+    <div id="tourCard" class="tour-card" role="dialog" aria-label="Quick tour">
+      <div class="tour-step" id="tourStep"></div>
+      <h3 id="tourTitle"></h3>
+      <p id="tourText"></p>
+      <div class="tour-dots" id="tourDots"></div>
+      <div class="row">
+        <button id="tourSkip" class="link">Skip tour</button>
+        <span class="spacer"></span>
+        <button id="tourBack" class="btn">Back</button>
+        <button id="tourNext" class="btn primary">Next</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/static/app.js"></script>

@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 from . import ai, mailbuild, resume
 from .analysis import analyze_pending
 from .api import bp, conn, cfg, login_required
-from .sync import now_iso
+from .sync import now_iso, set_meta
 
 
 def _profile_row(c):
@@ -125,6 +125,21 @@ def ai_analyze():
     return jsonify(analyze_pending(current_app.extensions["jobmail_db"], cfg, cfg("AI_BATCH")))
 
 
+@bp.post("/api/ai/test")
+@login_required
+def ai_test():
+    """Tiny request to each configured model so the user sees exactly what is wrong (key, credit, model name)."""
+    if not ai.enabled(cfg):
+        return jsonify(error="ai_disabled"), 400
+    results = ai.check_models(cfg)
+    ok = all(r["ok"] for r in results)
+    c = conn()
+    if ok:
+        set_meta(c, "ai_last_error", "")
+        c.commit()
+    return jsonify(ok=ok, results=results)
+
+
 # ---------- reply drafting ----------
 def _email_and_app(c, email_id):
     row = c.one("SELECT * FROM emails WHERE id=?", (email_id,))
@@ -150,8 +165,11 @@ def compose(email_id):
         out = ai.compose_reply(cfg, row, app_row, prof.get("full_name", ""),
                                prof.get("profile_text") or prof.get("resume_text") or "", has_resume,
                                str(d.get("instructions", ""))[:300])
+    except ai.AIError as exc:
+        current_app.logger.error("AI compose failed: kind=%s status=%s detail=%s", exc.kind, exc.status, exc.detail)
+        return jsonify(error="ai_failed", kind=exc.kind, help=ai.HELP.get(exc.kind, "")), 502
     except (requests.RequestException, ValueError):
-        return jsonify(error="ai_failed"), 502
+        return jsonify(error="ai_failed", kind="bad_reply", help=ai.HELP["bad_reply"]), 502
     to = mailbuild.first_address(row["reply_to"] or row["sender"])
     subject = out["subject"] or row["subject"]
     if not re.match(r"(?i)^re:", subject):

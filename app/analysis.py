@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import ai
 from .classify import STATUS_BY_CATEGORY
-from .sync import upsert_application
+from .sync import set_meta, upsert_application
 
 
 def profile_text(conn) -> str:
@@ -41,10 +41,14 @@ def analyze_pending(db, cfg, limit):
             outcomes = list(pool.map(work, rows))
 
         analyzed = removed = errors = 0
+        first_kind = ""
         for r, res, err in sorted(outcomes, key=lambda o: o[0]["received_at"]):
             if err is not None:
-                conn.execute("UPDATE emails SET ai_status='error' WHERE id=?", (r["id"],))
+                kind = getattr(err, "kind", "unknown")
+                first_kind = first_kind or kind
                 errors += 1
+                if kind not in ai.FATAL:  # fatal problems leave the email pending so it is retried once fixed
+                    conn.execute("UPDATE emails SET ai_status='error' WHERE id=?", (r["id"],))
                 continue
             if not res["is_job"]:
                 conn.execute("DELETE FROM emails WHERE id=?", (r["id"],))
@@ -62,9 +66,11 @@ def analyze_pending(db, cfg, limit):
                 (cat, company, role, app_id, res["summary"], res["fit_score"], res["fit_reason"], r["id"]))
             analyzed += 1
         cleanup_orphan_applications(conn)
+        set_meta(conn, "ai_last_error", first_kind if errors and not (analyzed or removed) else "")
         conn.commit()
         remaining = conn.one("SELECT COUNT(*) AS n FROM emails WHERE ai_status=''")["n"]
-        return {"analyzed": analyzed, "removed": removed, "errors": errors, "remaining": remaining}
+        return {"analyzed": analyzed, "removed": removed, "errors": errors, "remaining": remaining,
+                "error_kind": first_kind, "help": ai.HELP.get(first_kind, "")}
     except Exception:
         conn.rollback()
         raise

@@ -219,3 +219,63 @@ def test_mailbuild_helpers():
         pass
     else:
         raise AssertionError("accepted bad address")
+
+
+# ---------- AI error reporting ----------
+def _failing(kind_status, message):
+    import requests
+
+    class R:
+        status_code = kind_status
+        def json(self):
+            return {"type": "error", "error": {"type": "x", "message": message}}
+    return lambda *a, **k: R()
+
+
+def test_api_errors_are_classified(monkeypatch):
+    cases = [(401, "invalid x-api-key", "auth"), (400, "Your credit balance is too low", "billing"),
+             (404, "model: nope", "model"), (403, "forbidden", "permission"), (400, "bad", "bad_request")]
+    for status, msg, kind in cases:
+        monkeypatch.setattr(ai_mod.requests, "post", _failing(status, msg))
+        try:
+            ai_mod.complete(lambda k: "x", "s", "u", "m")
+        except ai_mod.AIError as exc:
+            assert exc.kind == kind, (status, exc.kind)
+        else:
+            raise AssertionError("no error raised")
+
+
+def test_compose_reports_the_reason(app, auth_client, monkeypatch):
+    app.config["ANTHROPIC_API_KEY"] = "k"
+    monkeypatch.setattr(ai_mod.requests, "post", _failing(400, "Your credit balance is too low to access the API"))
+    sync_all(auth_client)
+    mail = auth_client.get("/api/emails").get_json()["items"][0]
+    r = auth_client.post(f"/api/emails/{mail['id']}/compose", json={})
+    body = r.get_json()
+    assert r.status_code == 502 and body["kind"] == "billing" and "credit" in body["help"].lower()
+
+
+def test_fatal_ai_errors_keep_emails_pending_and_show_banner(app, auth_client, monkeypatch):
+    app.config["ANTHROPIC_API_KEY"] = "k"
+    monkeypatch.setattr(ai_mod.requests, "post", _failing(401, "invalid x-api-key"))
+    sync_all(auth_client)
+    out = auth_client.post("/api/ai/analyze", json={}).get_json()
+    assert out["error_kind"] == "auth" and out["analyzed"] == 0 and out["errors"] > 0
+    stats = auth_client.get("/api/stats").get_json()
+    assert stats["pending_ai"] == 5  # nothing was marked as failed: they retry once the key is fixed
+    assert stats["ai_error"]["kind"] == "auth" and "API key" in stats["ai_error"]["help"]
+
+
+def test_ai_connection_test_endpoint(app, auth_client, monkeypatch):
+    app.config["ANTHROPIC_API_KEY"] = "k"
+    monkeypatch.setattr(ai_mod.requests, "post", _failing(404, "model: claude-x"))
+    res = auth_client.post("/api/ai/test", json={}).get_json()
+    assert res["ok"] is False and res["results"][0]["kind"] == "model"
+
+    class Ok:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": "OK"}]}
+    monkeypatch.setattr(ai_mod.requests, "post", lambda *a, **k: Ok())
+    assert auth_client.post("/api/ai/test", json={}).get_json()["ok"] is True
+    assert auth_client.get("/api/stats").get_json()["ai_error"] is None

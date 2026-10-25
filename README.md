@@ -4,6 +4,8 @@ A personal web app that reads your Gmail, keeps **only job-related emails**, cla
 
 ## Features
 
+- **Gmail-style interface**: left sidebar (Inbox, Unread, Best matches, Board, Applications, colour labels), pill search bar, reading pane, 6 colour themes plus light/dark/auto and 3 densities (palette button), and a **Tour** button next to Sign out that walks through the app (also runs on first visit).
+- **AI diagnostics**: if AI fails, a banner and the sidebar chip say why (no credit, bad key, model name). Profile > **Test AI connection** checks the key and models.
 - **Gmail sign-in** with Google OAuth. Only the one account in `ALLOWED_EMAIL` can log in.
 - **Automatic sync**: runs when you open the app, when you return to the tab, and every 5 minutes while it is open. After the first full sync, later syncs only look back to just before the previous one, and messages are fetched in parallel, so they are quick. A manual **Sync** button is still there.
 - **Last 3 months, read/unread**: every job-related email from the last 90 days is imported, with its Gmail unread state kept up to date, an "unread" filter and an unread counter.

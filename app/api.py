@@ -394,6 +394,8 @@ def stats():
     pending_ai = c.one("SELECT COUNT(*) AS n FROM emails WHERE ai_status=''")["n"] if ai.enabled(cfg) else 0
     matches = c.one("SELECT COUNT(*) AS n FROM emails WHERE category IN ('opening','recruiter')"
                     " AND fit_score >= 70")["n"]
+    err_kind = get_meta(c, "ai_last_error") if ai.enabled(cfg) else ""
     return jsonify(applications=apps, emails=cats, total_emails=sum(cats.values()),
                    total_applications=sum(apps.values()), weekly=weekly, stale=stale,
-                   unread=unread, pending_ai=pending_ai, strong_matches=matches)
+                   unread=unread, pending_ai=pending_ai, strong_matches=matches,
+                   ai_error={"kind": err_kind, "help": ai.HELP.get(err_kind, "")} if err_kind else None)

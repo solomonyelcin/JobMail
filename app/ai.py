@@ -13,6 +13,53 @@ API_URL = "https://api.anthropic.com/v1/messages"
 CATEGORIES = ("applied", "assessment", "interview", "offer", "rejected", "opening", "recruiter")
 
 
+class AIError(Exception):
+    """An AI call failed. `kind` is a short code the UI can explain (see HELP)."""
+
+    def __init__(self, kind, detail="", status=None):
+        super().__init__(f"{kind}: {detail}")
+        self.kind, self.detail, self.status = kind, detail, status
+
+
+HELP = {
+    "auth": "Anthropic rejected the API key. Check that ANTHROPIC_API_KEY on your host is copied exactly (no spaces) and is still active.",
+    "permission": "The API key is not allowed to use this model. Check the key's workspace and permissions at console.anthropic.com.",
+    "billing": "Your Anthropic account has no usable credit. Add credit under Billing at console.anthropic.com, then try again.",
+    "model": "Anthropic does not recognise the AI model name. Check AI_MODEL / AI_COMPOSE_MODEL on your host, or remove them to use the defaults.",
+    "rate_limit": "Anthropic is rate-limiting requests. Wait a minute and try again.",
+    "overloaded": "Anthropic is busy right now. Try again in a few minutes.",
+    "network": "JobMail could not reach Anthropic. Try again in a moment.",
+    "bad_request": "Anthropic rejected the request. Check the model names and your account status.",
+    "bad_reply": "The AI returned an unexpected reply. Try again.",
+}
+# problems the user must fix; emails are left pending (not marked as failed) until they do
+FATAL = {"auth", "permission", "billing", "model"}
+
+
+def _error_from_response(r) -> AIError:
+    detail = ""
+    try:
+        detail = str(((r.json() or {}).get("error") or {}).get("message", ""))[:300]
+    except ValueError:
+        pass
+    low, code = detail.lower(), r.status_code
+    if code == 401:
+        kind = "auth"
+    elif code == 403:
+        kind = "permission"
+    elif code == 404:
+        kind = "model"
+    elif code == 429:
+        kind = "rate_limit"
+    elif code >= 500:
+        kind = "overloaded"
+    elif code == 400 and ("credit" in low or "billing" in low):
+        kind = "billing"
+    else:
+        kind = "bad_request"
+    return AIError(kind, detail, code)
+
+
 def enabled(cfg) -> bool:
     return bool(cfg("ANTHROPIC_API_KEY"))
 
@@ -24,15 +71,21 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
                "messages": [{"role": "user", "content": user}]}
     last = None
     for attempt in range(3):
-        r = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        if r.status_code in (429, 500, 502, 503, 529):
-            last = r
+        try:
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        except requests.RequestException as exc:
+            last = AIError("network", exc.__class__.__name__)
+            time.sleep(1.0 * (attempt + 1))
+            continue
+        if r.status_code == 200:
+            return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+        err = _error_from_response(r)
+        if err.kind in ("rate_limit", "overloaded") and attempt < 2:
+            last = err
             time.sleep(1.5 * (attempt + 1))
             continue
-        r.raise_for_status()
-        return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
-    last.raise_for_status()
-    return ""
+        raise err
+    raise last
 
 
 def parse_json(text: str) -> dict:
@@ -43,6 +96,25 @@ def parse_json(text: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("model reply was not a JSON object")
     return data
+
+
+def _json(text: str) -> dict:
+    try:
+        return parse_json(text)
+    except ValueError as exc:
+        raise AIError("bad_reply", str(exc)[:100]) from exc
+
+
+def check_models(cfg):
+    """Send a tiny request to each configured model. Returns [{"model", "ok", "kind", "help"}]."""
+    out = []
+    for model in dict.fromkeys([cfg("AI_MODEL"), cfg("AI_COMPOSE_MODEL")]):
+        try:
+            complete(cfg, "Reply with the single word OK.", "ping", model, 5)
+            out.append({"model": model, "ok": True, "kind": "", "help": ""})
+        except AIError as exc:
+            out.append({"model": model, "ok": False, "kind": exc.kind, "help": HELP.get(exc.kind, "")})
+    return out
 
 
 def _s(v, n):
@@ -74,7 +146,7 @@ def analyze_email(cfg, email: dict, profile_text: str) -> dict:
         "\nDate: " + _s(email.get("received_at"), 30) +
         "\nBody:\n" + (email.get("body_text") or email.get("snippet") or "")[:3500]
     )
-    data = parse_json(complete(cfg, ANALYZE_SYSTEM, user, cfg("AI_MODEL"), 400))
+    data = _json(complete(cfg, ANALYZE_SYSTEM, user, cfg("AI_MODEL"), 400))
     is_job = bool(data.get("is_job"))
     cat = str(data.get("category", "")).lower()
     if is_job and cat not in CATEGORIES:
@@ -113,7 +185,7 @@ def compose_reply(cfg, email: dict, application: dict | None, full_name: str, pr
         "\nSubject: " + _s(email.get("subject"), 250) +
         "\nBody:\n" + (email.get("body_text") or email.get("snippet") or "")[:3500]
     )
-    data = parse_json(complete(cfg, COMPOSE_SYSTEM, user, cfg("AI_COMPOSE_MODEL"), 700))
+    data = _json(complete(cfg, COMPOSE_SYSTEM, user, cfg("AI_COMPOSE_MODEL"), 700))
     subject = _s(data.get("subject"), 200)
     body = str(data.get("body") or "").strip()[:4000]
     if not body:
