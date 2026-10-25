@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>JobMail</title>
+  <title>SmartMail</title>
   <meta name="theme-color" content="#0b57d0">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
@@ -13,12 +13,12 @@
   <section id="login" class="hero hidden">
     <div class="hero-card">
       <div class="logo big" data-icon="mail"></div>
-      <h2>Your job search, organised automatically</h2>
-      <p class="muted">JobMail reads your Gmail, keeps only job-related emails from the last 3 months, and tracks every application from applied to offer. It only creates reply drafts when you ask, and never sends anything itself.</p>
+      <h2>Your inbox, organised automatically</h2>
+      <p class="muted">SmartMail reads your Gmail and sorts it into three workspaces: your job search, your banking and your personal mail. It only creates reply drafts when you ask, and never sends anything itself.</p>
       <ul class="features">
-        <li>A Gmail-style inbox just for job emails</li>
-        <li>AI that spots the best-fit jobs and drafts replies</li>
-        <li>Kanban board, search, filters and CSV export</li>
+        <li>Jobs: applications board, AI job matches and reply drafts</li>
+        <li>Banking: spending, income, EMIs and bills with charts</li>
+        <li>Personal: mail from family, friends and starred messages</li>
       </ul>
       <p id="loginError" class="error hidden"></p>
       <a class="btn primary large" href="/auth/login">Sign in with Google</a>
@@ -29,7 +29,7 @@
   <div id="appShell" class="hidden">
     <header class="topbar">
       <button id="menuBtn" class="icon-btn" aria-label="Toggle sidebar" title="Menu"><span data-icon="menu"></span></button>
-      <div class="brand"><span class="logo" data-icon="mail"></span><span class="brand-name">JobMail</span></div>
+      <div class="brand"><span class="logo" data-icon="mail"></span><span class="brand-name">SmartMail</span></div>
       <div class="search" id="searchBox">
         <span data-icon="search"></span>
         <input id="q" type="search" placeholder="Search job emails…" autocomplete="off" aria-label="Search">
@@ -53,21 +53,61 @@
 
     <div class="shell">
       <nav id="sidebar" class="sidebar" aria-label="Main">
-        <button id="addBtn" class="compose-btn"><span data-icon="plus"></span><span class="nl">Add application</span></button>
-        <div id="sidebarNav" class="nav">
-          <button class="nav-item" data-view="dashboard"><span data-icon="dashboard"></span><span class="nl">Dashboard</span></button>
-          <button class="nav-item" data-view="inbox"><span data-icon="inbox"></span><span class="nl">Inbox</span><span class="count" id="cInbox"></span></button>
-          <button class="nav-item" data-view="unread"><span data-icon="mail"></span><span class="nl">Unread</span><span class="count" id="cUnread"></span></button>
-          <button class="nav-item" data-view="matches"><span data-icon="star"></span><span class="nl">Best matches</span><span class="count" id="cMatches"></span></button>
-          <button class="nav-item" data-view="board"><span data-icon="board"></span><span class="nl">Board</span><span class="count" id="cBoard"></span></button>
-          <button class="nav-item" data-view="list"><span data-icon="list"></span><span class="nl">Applications</span></button>
+        <div class="ws-switch">
+          <button id="wsBtn" class="ws-btn" aria-haspopup="true" aria-expanded="false" title="Change workspace">
+            <span class="ws-ico" id="wsIco"></span>
+            <span class="ws-text"><b id="wsName">Job</b><small id="wsSub">Applications</small></span>
+            <span data-icon="chevron"></span>
+          </button>
+          <div id="wsMenu" class="ws-menu hidden" role="menu" aria-label="Workspaces"></div>
         </div>
-        <div class="nav-title">Labels</div>
-        <div id="labelNav" class="nav"></div>
-        <div class="nav-title">Account</div>
-        <div class="nav">
-          <button class="nav-item" data-view="profile"><span data-icon="user"></span><span class="nl">Profile &amp; resume</span></button>
+
+        <div class="ws-group" data-ws="job">
+          <button id="addBtn" class="compose-btn"><span data-icon="plus"></span><span class="nl">Add application</span></button>
+          <div id="sidebarNav" class="nav">
+            <button class="nav-item" data-view="dashboard"><span data-icon="dashboard"></span><span class="nl">Dashboard</span></button>
+            <button class="nav-item" data-view="inbox"><span data-icon="inbox"></span><span class="nl">Inbox</span><span class="count" id="cInbox"></span></button>
+            <button class="nav-item" data-view="unread"><span data-icon="mail"></span><span class="nl">Unread</span><span class="count" id="cUnread"></span></button>
+            <button class="nav-item" data-view="matches"><span data-icon="star"></span><span class="nl">Best matches</span><span class="count" id="cMatches"></span></button>
+            <button class="nav-item" data-view="board"><span data-icon="board"></span><span class="nl">Board</span><span class="count" id="cBoard"></span></button>
+            <button class="nav-item" data-view="list"><span data-icon="list"></span><span class="nl">Applications</span></button>
+          </div>
+          <div class="nav-title">Labels</div>
+          <div id="labelNav" class="nav"></div>
+          <div class="nav-title">Account</div>
+          <div class="nav">
+            <button class="nav-item" data-view="profile"><span data-icon="user"></span><span class="nl">Profile &amp; resume</span></button>
+          </div>
         </div>
+
+        <div class="ws-group hidden" data-ws="bank">
+          <div class="nav" id="bankNav">
+            <button class="nav-item" data-view="bank:dashboard"><span data-icon="chart"></span><span class="nl">Overview</span></button>
+            <button class="nav-item" data-view="bank:transactions"><span data-icon="list"></span><span class="nl">Transactions</span><span class="count" id="cBankTx"></span></button>
+            <button class="nav-item" data-view="bank:bills"><span data-icon="calendar"></span><span class="nl">Bills &amp; EMIs</span><span class="count" id="cBankDue"></span></button>
+          </div>
+          <div class="nav-title">Filters</div>
+          <div class="nav">
+            <button class="nav-item" data-view="bank:spend"><span data-icon="down"></span><span class="nl">Spending</span></button>
+            <button class="nav-item" data-view="bank:credit"><span data-icon="up"></span><span class="nl">Income</span></button>
+          </div>
+        </div>
+
+        <div class="ws-group hidden" data-ws="personal">
+          <div id="personalNav" class="nav">
+            <button class="nav-item" data-view="personal:inbox"><span data-icon="inbox"></span><span class="nl">Inbox</span><span class="count" id="cPAll"></span></button>
+            <button class="nav-item" data-view="personal:unread"><span data-icon="mail"></span><span class="nl">Unread</span><span class="count" id="cPUnread"></span></button>
+            <button class="nav-item" data-view="personal:needs_reply"><span data-icon="reply"></span><span class="nl">Needs reply</span><span class="count" id="cPReply"></span></button>
+            <button class="nav-item" data-view="personal:starred"><span data-icon="star"></span><span class="nl">Starred &amp; important</span><span class="count" id="cPStar"></span></button>
+          </div>
+          <div class="nav-title">People</div>
+          <div class="nav">
+            <button class="nav-item" data-view="personal:family"><span class="ldot" id="ldFamily"></span><span class="nl">Family</span><span class="count" id="cPFam"></span></button>
+            <button class="nav-item" data-view="personal:friend"><span class="ldot" id="ldFriend"></span><span class="nl">Friends</span><span class="count" id="cPFri"></span></button>
+            <button class="nav-item" data-view="personal:people"><span data-icon="user"></span><span class="nl">Manage people</span><span class="count" id="cPPeople"></span></button>
+          </div>
+        </div>
+
         <button id="aiChip" class="ai-chip" data-view="profile"><span data-icon="sparkle"></span><span class="nl" id="aiChipText">AI off</span></button>
       </nav>
 
@@ -137,12 +177,37 @@
               <div id="listView" class="list-wide hidden"></div>
             </div>
 
+            <!-- Banking workspace -->
+            <div id="bankView" class="view hidden">
+              <div class="list-toolbar">
+                <h2 class="view-title" id="bankTitle">Banking overview</h2>
+                <span class="spacer"></span>
+                <select id="bankRange" aria-label="Time range">
+                  <option value="30">Last 30 days</option><option value="90" selected>Last 3 months</option>
+                  <option value="180">Last 6 months</option><option value="365">Last 12 months</option>
+                </select>
+              </div>
+              <div id="bankBody"></div>
+            </div>
+
+            <!-- Personal workspace -->
+            <div id="personalView" class="view hidden">
+              <div class="list-toolbar">
+                <h2 class="view-title" id="personalTitle">Personal inbox</h2>
+                <span id="personalCount" class="muted"></span>
+                <span class="spacer"></span>
+                <button id="personalAI" class="btn small hidden"><span data-icon="sparkle"></span>Summarise with AI</button>
+              </div>
+              <div id="personalBody"></div>
+              <div class="more-wrap"><button id="personalMore" class="btn hidden">Load more</button></div>
+            </div>
+
             <!-- Profile -->
             <div id="profileView" class="view hidden profile">
               <h2 class="view-title">Profile &amp; resume</h2>
               <section class="panel">
                 <h3>Resume</h3>
-                <p class="muted">Attached to the reply drafts JobMail creates. PDF, DOCX or TXT, up to 2 MB.</p>
+                <p class="muted">Attached to the reply drafts SmartMail creates. PDF, DOCX or TXT, up to 2 MB.</p>
                 <div id="resumeInfo" class="muted">No resume uploaded.</div>
                 <div class="row wrap">
                   <label class="btn primary" for="resumeFile">Upload / replace</label>
@@ -248,5 +313,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/static/app.js"></script>
+  <script src="/static/ws.js"></script>
 </body>
 </html>

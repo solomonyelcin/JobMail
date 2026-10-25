@@ -1,6 +1,14 @@
-# JobMail
+# SmartMail
 
 A personal web app that reads your Gmail, keeps **only job-related emails**, classifies them, and tracks each application from "applied" to "offer" or "rejected". Works on laptop and phone.
+
+## Workspaces
+
+Switch workspace from the menu at the top of the sidebar:
+
+- **Job**: everything below (applications, AI job matches, reply drafts).
+- **Banking**: reads transaction alerts, card statements and EMI/loan reminders from your banks. Shows income vs spending by month, spending by category, top merchants, upcoming bills and EMIs, loans and last-seen balances, with a transactions table where you can fix categories (a fix applies to every transaction from the same merchant). Amounts are parsed by rules; with AI on, anything the rules cannot categorise is categorised in batches, and "Get AI insights" writes a short commentary. Duplicate alerts for one payment (bank + UPI app) are counted once.
+- **Personal**: mail from people you add (family, friends), messages you star in Gmail, and mail Gmail marks as important (promotions excluded). Filters for unread, needs reply (AI), family and friends. Job and bank mail stays out.
 
 ## Features
 
@@ -10,7 +18,7 @@ A personal web app that reads your Gmail, keeps **only job-related emails**, cla
 - **Automatic sync**: runs when you open the app, when you return to the tab, and every 5 minutes while it is open. After the first full sync, later syncs only look back to just before the previous one, and messages are fetched in parallel, so they are quick. A manual **Sync** button is still there.
 - **Last 3 months, read/unread**: every job-related email from the last 90 days is imported, with its Gmail unread state kept up to date, an "unread" filter and an unread counter.
 - **AI (optional; free with `GEMINI_API_KEY` or `GROQ_API_KEY`, or paid with `ANTHROPIC_API_KEY`)**: sorts mail into applied / assessment / interview / offer / rejected / opening / recruiter, drops non-job mail, writes a one-line summary of each email, and scores every job opening or recruiter message 0-100 against your profile (**Best matches** tab).
-- **Reply with AI**: writes a reply in your voice, lets you edit it, then creates a **Gmail draft** (threaded, with your resume attached) and gives you a link to open it. JobMail never sends mail itself; you review and press send in Gmail.
+- **Reply with AI**: writes a reply in your voice, lets you edit it, then creates a **Gmail draft** (threaded, with your resume attached) and gives you a link to open it. SmartMail never sends mail itself; you review and press send in Gmail.
 - **Profile and resume**: upload or replace your resume (PDF, DOCX, TXT) and edit the profile text the AI uses.
 - **Classification (rules, always on)**: `applied`, `assessment`, `interview`, `offer`, `rejected`, `opening` (rule based, see `app/classify.py`). Newsletters and course promotions that merely mention interviews are filtered out. When the rules change, stored emails are re-classified automatically on the next start.
 - **Application tracking**: company and role are extracted automatically; status follows the latest email. Manual status edits are never overwritten by later syncs.
@@ -60,7 +68,7 @@ Follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Privacy
 
-JobMail requests two Gmail permissions: `gmail.readonly` (read mail) and `gmail.compose` (create drafts). The code only ever reads mail and creates a draft when you press "Create Gmail draft"; it does not send, delete or modify messages. Note that Google's `compose` permission technically also allows sending, so keep your Google credentials and the host's environment variables private.
+SmartMail requests two Gmail permissions: `gmail.readonly` (read mail) and `gmail.compose` (create drafts). The code only ever reads mail and creates a draft when you press "Create Gmail draft"; it does not send, delete or modify messages. Note that Google's `compose` permission technically also allows sending, so keep your Google credentials and the host's environment variables private.
 
 When AI is enabled, the text of job-related emails and your profile/resume text are sent to Anthropic's API for analysis and drafting. Only emails matching job-related rules are saved (subject, sender, snippet, first 4,000 characters of text). Message ids of non-job emails are remembered so they are not re-fetched.
 

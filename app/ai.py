@@ -121,7 +121,7 @@ _HELP = {
     "model": "{p} does not recognise the AI model name. Check AI_MODEL / AI_COMPOSE_MODEL on your host, or remove them to use the defaults.",
     "rate_limit": "{p} is rate-limiting requests (free plans have low limits). Wait a minute and try again.",
     "overloaded": "{p} is busy right now. Try again in a few minutes.",
-    "network": "JobMail could not reach {p}. Try again in a moment.",
+    "network": "SmartMail could not reach {p}. Try again in a moment.",
     "bad_request": "{p} rejected the request. Check the model names and your account status.",
     "bad_reply": "The AI returned an unexpected reply. Try again.",
 }

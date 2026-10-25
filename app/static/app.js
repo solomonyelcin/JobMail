@@ -7,7 +7,7 @@ const S = {
   statuses: [], categories: [], view: "dashboard", apps: [], statusFilter: "", sort: "recent",
   emailPage: 1, emailCat: "", unreadOnly: false, emailReq: 0, selectedId: null, editing: null, drawerId: null,
   syncing: false, analyzing: false, lastSync: null, aiEnabled: false, canDraft: false, profile: null, stats: null,
-  aiWarned: {},
+  aiWarned: {}, ws: "job",
 };
 
 // ---------- icons (stroke style, 24x24) ----------
@@ -199,8 +199,8 @@ document.addEventListener("click", (e) => {
 // ---------- signed-out screen ----------
 function authErrorText(code) {
   return ({
-    account_not_allowed: "That Google account is not allowed to use this JobMail instance.",
-    no_refresh_token: "Google did not return offline access. Remove JobMail at myaccount.google.com/permissions and sign in again.",
+    account_not_allowed: "That Google account is not allowed to use this SmartMail instance.",
+    no_refresh_token: "Google did not return offline access. Remove SmartMail at myaccount.google.com/permissions and sign in again.",
     state_mismatch: "Sign-in expired. Please try again.",
     google_request_failed: "Could not reach Google. Please try again.",
     access_denied: "Sign-in was cancelled.",
@@ -217,9 +217,12 @@ function showLogin(msg) {
 const VIEW_TYPE = { dashboard: "dashboard", inbox: "emails", unread: "emails", matches: "matches", board: "apps", list: "apps", profile: "profile" };
 const viewType = (k) => (k.startsWith("label:") ? "emails" : VIEW_TYPE[k] || "dashboard");
 function setView(key, load = true) {
+  if (/^(bank|personal):/.test(key)) return wsSetView(key, load);
+  if (S.ws !== "job") wsEnter("job");
   S.view = key; const type = viewType(key);
   S.unreadOnly = key === "unread"; S.emailCat = key.startsWith("label:") ? key.slice(6) : "";
   ["dashboard", "emails", "matches", "apps", "profile"].forEach((t) => $(t + "View").classList.toggle("hidden", t !== type));
+  $("bankView").classList.add("hidden"); $("personalView").classList.add("hidden");
   $("boardView").classList.toggle("hidden", key !== "board"); $("listView").classList.toggle("hidden", key !== "list");
   $("segBoard").classList.toggle("active", key === "board"); $("segList").classList.toggle("active", key === "list");
   $("appsTitle").textContent = key === "list" ? "Applications" : "Board";
@@ -231,6 +234,7 @@ function setView(key, load = true) {
   ({ dashboard: loadDashboard, emails: () => loadEmails(true), matches: loadMatches, apps: loadApps, profile: loadProfile })[type]();
 }
 function refreshAll() {
+  if (S.ws !== "job") return wsRefresh();
   const t = viewType(S.view), jobs = [loadStats()];
   if (t === "apps") jobs.push(loadApps());
   if (t === "emails" && S.emailPage === 1) jobs.push(loadEmails(true));
@@ -250,7 +254,7 @@ async function boot() {
   fillSelect($("fStatus"), S.statuses); fillSelect($("statusFilter"), S.statuses, "All statuses");
   buildLabelNav();
   $("login").classList.add("hidden"); $("appShell").classList.remove("hidden");
-  setPill("ok"); setView("dashboard");
+  setPill("ok"); wsInit();
   maybeAutoSync();
   if (!store("jm-tour-done")) setTimeout(startTour, 1200);
 }
@@ -264,6 +268,7 @@ function setPill(state, text) {
 setInterval(() => { if (!S.syncing && !S.analyzing && !$("appShell").classList.contains("hidden")) setPill("ok"); }, 30000);
 
 async function sync(opts = {}) {
+  if (S.ws !== "job") return wsSync(opts);
   if (S.syncing) return;
   S.syncing = true; setPill("syncing");
   let checked = 0, stored = 0, first = true;
@@ -294,7 +299,7 @@ function maybeAutoSync() {
 setInterval(maybeAutoSync, 60 * 1000);
 document.addEventListener("visibilitychange", maybeAutoSync);
 $("syncBtn").addEventListener("click", () => sync({}));
-$("exportBtn").addEventListener("click", () => { location.href = "/api/export.csv"; });
+$("exportBtn").addEventListener("click", () => { location.href = S.ws === "bank" ? "/api/bank/export.csv" : "/api/export.csv"; });
 
 // ---------- AI analysis ----------
 async function runAnalysis(opts = {}) {
@@ -395,7 +400,7 @@ async function loadDashboardLists() {
   const [recent, prof] = await Promise.all([api("GET", "/api/emails?page=1"), api("GET", "/api/profile").catch(() => null)]);
   S.profile = prof || S.profile;
   const box = $("recentList"); box.replaceChildren();
-  if (!recent.items.length) box.append(emptyState("inbox", "No job emails yet", "JobMail checks Gmail automatically. You can also sync right now.", "Sync now", () => sync({})));
+  if (!recent.items.length) box.append(emptyState("inbox", "No job emails yet", "SmartMail checks Gmail automatically. You can also sync right now.", "Sync now", () => sync({})));
   recent.items.slice(0, 6).forEach((e) => box.append(emailRow(e, true)));
   const list = $("setupList"); list.replaceChildren();
   const p = S.profile || {};
@@ -444,7 +449,7 @@ async function loadEmails(reset) {
     const searching = $("q").value.trim();
     box.append(searching ? emptyState("search", "No emails match your search", "Try fewer words or clear the date filters.")
       : S.unreadOnly ? emptyState("check", "You're all caught up", "No unread job emails.")
-      : emptyState("inbox", "Nothing here yet", "JobMail checks Gmail automatically. You can also sync right now.", "Sync now", () => sync({})));
+      : emptyState("inbox", "Nothing here yet", "SmartMail checks Gmail automatically. You can also sync right now.", "Sync now", () => sync({})));
   }
   data.items.forEach((e) => box.append(emailRow(e)));
   $("emailCount").textContent = data.total ? `${data.total} email${data.total === 1 ? "" : "s"}` : "";
@@ -455,7 +460,7 @@ $("moreBtn").addEventListener("click", () => { S.emailPage += 1; loadEmails(fals
 
 // ---------- reading pane ----------
 function placePane() {
-  const docked = viewType(S.view) === "emails" && matchMedia("(min-width: 1100px)").matches;
+  const docked = (viewType(S.view) === "emails" || S.ws === "personal") && matchMedia("(min-width: 1100px)").matches;
   $("emailPane").classList.toggle("overlay", !docked); syncBackdrop();
 }
 window.addEventListener("resize", debounce(() => { placePane(); if (T.open) placeTour(TOUR[T.i]); }, 120));
@@ -477,8 +482,8 @@ function renderEmailPane(e) {
   const bar = el("div", "pane-bar");
   bar.append(iconBtn("back", "Back", closeEmailPane), el("span", "spacer"));
   if (e.application_id) { const b = el("button", "btn small", "Open application"); b.addEventListener("click", () => openDrawer(e.application_id)); bar.append(b); }
-  bar.append(iconBtn("ban", "Not job-related: remove from JobMail", async () => {
-    if (!confirm("Remove this email from JobMail? It will not be imported again.")) return;
+  bar.append(iconBtn("ban", "Not job-related: remove from SmartMail", async () => {
+    if (!confirm("Remove this email from SmartMail? It will not be imported again.")) return;
     await api("DELETE", "/api/emails/" + e.id); closeEmailPane();
     const r = document.querySelector(`#emailList .erow[data-id="${e.id}"]`); if (r) r.remove();
     toast("Email removed"); loadStats();
@@ -764,28 +769,29 @@ $("cCreate").addEventListener("click", async () => {
     toast(r.attached ? "Draft created with your resume attached" : "Draft created", "ok");
   } catch (err) {
     $("composeWarn").textContent = err.data && err.data.error === "reauth_scope"
-      ? "JobMail needs permission to create drafts. Open the Profile page and use “Re-connect Google”." : "Could not create the draft: " + err.message;
+      ? "SmartMail needs permission to create drafts. Open the Profile page and use “Re-connect Google”." : "Could not create the draft: " + err.message;
     $("composeWarn").classList.remove("hidden");
   } finally { $("cCreate").disabled = false; }
 });
 
 // ---------- guided tour ----------
 const TOUR = [
-  { t: "Welcome to JobMail", x: "A one-minute tour. JobMail turns the job emails in your Gmail into an inbox, a pipeline board and AI-scored job matches." },
+  { t: "Welcome to SmartMail", x: "A one-minute tour. SmartMail sorts your Gmail into three workspaces: Job, Banking and Personal. We start in Job, where emails become an inbox, a pipeline board and AI-scored job matches." },
+  { t: "Switch workspace", x: "Use this menu to move between Job, Banking (spending, EMIs and bills with charts) and Personal (family, friends and starred mail). Each has its own sidebar.", sel: "#wsBtn", side: true },
   { t: "Your sidebar", x: "Dashboard shows the big picture. Inbox has every job email from the last 3 months and Unread mirrors Gmail's unread state.", sel: "#sidebarNav", side: true },
   { t: "Labels", x: "Emails are sorted automatically into Applied, Assessment, Interview, Offer, Rejected, Opening and Recruiter. Click a label to filter.", sel: "#labelNav", side: true },
   { t: "Search", x: "Search subjects, senders and message text. Press / anywhere to jump here, and j / k to move through emails.", sel: "#searchBox" },
-  { t: "Automatic sync", x: "JobMail checks Gmail when you open it and every 5 minutes. Press refresh to sync right now.", sel: "#syncBtn" },
+  { t: "Automatic sync", x: "SmartMail checks Gmail when you open it and every 5 minutes. Press refresh to sync right now.", sel: "#syncBtn" },
   { t: "Best matches", x: "With AI on, every job opening and recruiter message is scored against your profile. The best fits are collected here.", sel: '#sidebar [data-view="matches"]', side: true },
   { t: "Applications board", x: "Each company becomes a card. Drag cards between columns to change their status, or click one for notes and its email timeline.", sel: '#sidebar [data-view="board"]', side: true },
-  { t: "Add your own", x: "Applied somewhere JobMail cannot see? Add it by hand.", sel: "#addBtn", side: true },
+  { t: "Add your own", x: "Applied somewhere SmartMail cannot see? Add it by hand.", sel: "#addBtn", side: true },
   { t: "Profile & resume", x: "Upload your resume and describe what you want. The AI uses this to score jobs and to draft replies with your resume attached.", sel: '#sidebar [data-view="profile"]', side: true },
   { t: "Reply with AI", x: "Open any email and press “Reply with AI”. You get an editable message, then a Gmail draft with your resume attached. Nothing is sent until you press send in Gmail." },
   { t: "Make it yours", x: "Pick a theme and a display density, just like Gmail.", sel: "#themeBtn" },
   { t: "Replay anytime", x: "Press Tour whenever you want to see this again.", sel: "#tourBtn" },
 ];
 const T = { i: 0, open: false };
-function startTour() { if ($("appShell").classList.contains("hidden")) return; T.open = true; T.i = 0; $("tour").classList.remove("hidden"); showTour(); }
+function startTour() { if ($("appShell").classList.contains("hidden")) return; if (S.ws !== "job") setView("dashboard"); T.open = true; T.i = 0; $("tour").classList.remove("hidden"); showTour(); }
 function endTour() {
   T.open = false; $("tour").classList.add("hidden"); store("jm-tour-done", "1");
   if (isNarrow()) $("sidebar").classList.remove("open"); syncBackdrop();
@@ -827,6 +833,7 @@ $("tourBtn").addEventListener("click", startTour);
 
 // ---------- search + keyboard ----------
 const onSearch = debounce(() => {
+  if (S.ws !== "job") return wsSearch();
   const t = viewType(S.view);
   if (t === "emails") loadEmails(true); else if (t === "apps") loadApps(); else setView("inbox");
 });

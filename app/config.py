@@ -11,7 +11,7 @@ def load_config(overrides=None):
         "BASE_URL": base_url,
         "GOOGLE_CLIENT_ID": os.environ.get("GOOGLE_CLIENT_ID", ""),
         "GOOGLE_CLIENT_SECRET": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-        # Only this Google account may sign in (JobMail is a personal app).
+        # Only this Google account may sign in (SmartMail is a personal app).
         "ALLOWED_EMAIL": os.environ.get("ALLOWED_EMAIL", "").strip().lower(),
         # optional: enables AI categorisation, job-fit scoring and reply drafting
         "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", "").strip(),

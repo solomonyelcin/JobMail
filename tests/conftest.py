@@ -67,7 +67,7 @@ def app():
     db = a.extensions["jobmail_db"]
     # start every test from empty tables (matters when TEST_DATABASE_URL points at Postgres)
     c = db.connect()
-    for t in ("emails", "applications", "seen_messages", "ignored_messages", "profile", "meta", "accounts"):
+    for t in ("transactions", "wmails", "wseen", "people", "emails", "applications", "seen_messages", "ignored_messages", "profile", "meta", "accounts"):
         c.execute(f"DELETE FROM {t}")
     c.commit()
     c.close()

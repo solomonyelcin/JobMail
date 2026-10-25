@@ -162,6 +162,7 @@ def parse_message(msg):
         "sender": headers.get("from", ""),
         "snippet": msg.get("snippet", ""),
         "is_unread": 1 if "UNREAD" in (msg.get("labelIds") or []) else 0,
+        "labels": list(msg.get("labelIds") or []),
         "message_id": headers.get("message-id", "")[:300],
         "reply_to": headers.get("reply-to", "")[:300],
         "body_text": re.sub(r"\n{3,}", "\n\n", text).strip()[:4000],

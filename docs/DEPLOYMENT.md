@@ -1,6 +1,6 @@
-# Deploying JobMail
+# Deploying SmartMail
 
-Result: JobMail at a public HTTPS URL (for example `https://jobmail.onrender.com`) that works from your laptop and phone, with code in your private GitHub repo `JobMail` and automatic deploys on every push to `main` once tests pass.
+Result: SmartMail at a public HTTPS URL (for example `https://jobmail.onrender.com`) that works from your laptop and phone, with code in your private GitHub repo `SmartMail` and automatic deploys on every push to `main` once tests pass.
 
 Total cost: free (Render free web service + Neon free Postgres). Time: about 30 minutes.
 
@@ -34,7 +34,7 @@ Check that `.env` is not in the repository (only `.env.example` should be).
 2. Create a project named `jobmail`, choose a region near you.
 3. Copy the **connection string** (it looks like `postgresql://user:password@ep-xxxx.neon.tech/neondb?sslmode=require`). Keep it secret. This is your `DATABASE_URL`.
 
-JobMail creates its tables automatically on first start.
+SmartMail creates its tables automatically on first start.
 
 ## 4. Create the backend (Render)
 
@@ -57,17 +57,17 @@ JobMail creates its tables automatically on first start.
 
 ## 5. Configure Gmail OAuth (Google Cloud)
 
-1. Go to https://console.cloud.google.com, create a project named `JobMail`.
+1. Go to https://console.cloud.google.com, create a project named `SmartMail`.
 2. **APIs & Services > Library**: search **Gmail API** and click **Enable**.
 3. **APIs & Services > OAuth consent screen** (or "Google Auth platform"):
-   - User type: **External**. App name `JobMail`. Support and developer email: yours.
+   - User type: **External**. App name `SmartMail`. Support and developer email: yours.
    - **Data access / Scopes**: add `.../auth/gmail.readonly` (plus `openid` and `email`).
    - **Test users**: add your Gmail address.
 4. **Publish the app** (set publishing status to **In production**).
    - Important: while the status is **Testing**, Google expires the refresh token after **7 days**, and you would have to sign in weekly.
-   - Because `gmail.readonly` is a restricted scope and you are not going through Google's verification, sign-in shows "Google hasn't verified this app". For your own account click **Advanced > Go to JobMail (unsafe)**. This is expected for a personal app. Unverified apps are limited to 100 users, which is irrelevant here.
+   - Because `gmail.readonly` is a restricted scope and you are not going through Google's verification, sign-in shows "Google hasn't verified this app". For your own account click **Advanced > Go to SmartMail (unsafe)**. This is expected for a personal app. Unverified apps are limited to 100 users, which is irrelevant here.
 5. **Credentials > Create credentials > OAuth client ID**:
-   - Application type: **Web application**, name `JobMail web`.
+   - Application type: **Web application**, name `SmartMail web`.
    - **Authorized redirect URIs** (exact match, no trailing slash):
      - `<your-url>/auth/callback`
      - `http://localhost:8000/auth/callback` (only if you want to run locally)
@@ -113,12 +113,16 @@ The first request after idle takes up to ~1 minute on Render's free plan while t
 
 1. Get an AI key. **Free option (recommended):** sign in at https://aistudio.google.com/apikey with your Google account and press **Create API key**. No card is needed; the free tier has daily limits, so a large first scan may finish over a few runs. Alternatives: a free Groq key (https://console.groq.com/keys, variable `GROQ_API_KEY`) or a paid Anthropic key (`ANTHROPIC_API_KEY`).
 2. In Render, open the service **Environment** and add `GEMINI_API_KEY` with the key (or the variable for the provider you chose). Save (the service restarts). If several keys are set, free providers are preferred; force one with `AI_PROVIDER` (`gemini`, `groq`, `openrouter`, `anthropic`).
-3. In Google Cloud, open the OAuth consent screen / **Data access** and add the scope `https://www.googleapis.com/auth/gmail.compose` next to `gmail.readonly`. This lets JobMail create reply drafts.
-4. In JobMail, press **Sign out**, then **Sign in with Google** again and accept the extra permission. (The Profile page shows a "Re-connect Google" button if drafts are not allowed yet.)
+3. In Google Cloud, open the OAuth consent screen / **Data access** and add the scope `https://www.googleapis.com/auth/gmail.compose` next to `gmail.readonly`. This lets SmartMail create reply drafts.
+4. In SmartMail, press **Sign out**, then **Sign in with Google** again and accept the extra permission. (The Profile page shows a "Re-connect Google" button if drafts are not allowed yet.)
 5. Open the **Profile** tab: upload your resume and review the profile text, then press **Rescan last 3 months**.
 6. Check **Best matches** and try **Reply with AI** on an email.
 
 Without an AI key everything else still works with the built-in rules.
+
+## 10. Renaming and workspaces
+
+The app is called SmartMail in the interface. Your GitHub repo and Render service keep their old names (renaming them would change your URLs and break the deploy hook), which is fine. To also change what Google shows on the sign-in screen, open Google Cloud > **OAuth consent screen / Branding** and change the app name to SmartMail. No new Google permission is needed for the Banking and Personal workspaces.
 
 ## Troubleshooting
 
@@ -126,7 +130,7 @@ Without an AI key everything else still works with the built-in rules.
 |---------|-----|
 | Google error `redirect_uri_mismatch` | The redirect URI in Google must equal `BASE_URL` + `/auth/callback` exactly (https, no trailing slash). |
 | "That Google account is not allowed" | `ALLOWED_EMAIL` must match the Google account you sign in with. |
-| "Google did not return offline access" | Remove JobMail at https://myaccount.google.com/permissions and sign in again. |
+| "Google did not return offline access" | Remove SmartMail at https://myaccount.google.com/permissions and sign in again. |
 | Asked to sign in again every week | Publishing status is still **Testing**; set it to **In production** (step 5.4). |
 | `/healthz` returns 500 | Check `DATABASE_URL` and that Neon is reachable; see Render logs. |
 | "Re-connect Google" shown / draft fails with a permission message | Add the `gmail.compose` scope in Google Cloud (section 9, step 3), then sign out and in again. |
