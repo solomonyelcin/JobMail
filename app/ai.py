@@ -27,6 +27,26 @@ SETTING_KEYS = ("AI_PROVIDER", "AI_MODEL", "AI_COMPOSE_MODEL", "ANTHROPIC_API_KE
 
 
 _GEMINI_PICK = {}
+_GROQ_PICK = {}
+_GROQ_PREFER = ("gpt-oss-120b", "llama-3.3-70b", "llama-4-maverick", "llama-4-scout", "llama-3.1-70b", "gpt-oss-20b",
+                "llama-3.1-8b")
+_NOT_CHAT = ("whisper", "guard", "tts", "orpheus", "embed", "playai", "safeguard", "distil")
+
+
+def discover_groq_model(key: str) -> str:
+    """Pick a currently available chat model from Groq's model list (names there change often)."""
+    if key in _GROQ_PICK:
+        return _GROQ_PICK[key]
+    try:
+        r = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": "Bearer " + key}, timeout=30)
+        ids = [str(m.get("id", "")) for m in r.json().get("data", []) if m.get("active", True)] if r.status_code == 200 else []
+    except (requests.RequestException, ValueError):
+        ids = []
+    ids = [i for i in ids if i and not any(w in i.lower() for w in _NOT_CHAT)]
+    pick = next((i for pref in _GROQ_PREFER for i in ids if pref in i.lower()), ids[0] if ids else "")
+    if pick:
+        _GROQ_PICK[key] = pick
+    return pick
 
 
 def discover_gemini_model(key: str) -> str:
@@ -79,6 +99,8 @@ def model_for(cfg, role: str) -> str:
     p = provider(cfg)
     if p == "gemini" and _GEMINI_PICK.get(cfg("GEMINI_API_KEY")):
         return _GEMINI_PICK[cfg("GEMINI_API_KEY")]
+    if p == "groq" and _GROQ_PICK.get(cfg("GROQ_API_KEY")):
+        return _GROQ_PICK[cfg("GROQ_API_KEY")]
     i = 0 if role == "analyze" else 1
     return OPENAI_STYLE[p][2 + i] if p in OPENAI_STYLE else ANTHROPIC_DEFAULTS[i]
 CATEGORIES = ("applied", "assessment", "interview", "offer", "rejected", "opening", "recruiter")
@@ -182,9 +204,10 @@ def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> 
         if err.kind == "bad_request" and "reasoning_effort" in payload:
             payload.pop("reasoning_effort")  # this model does not accept the option: retry without it
             continue
-        if err.kind == "model" and p == "gemini" and not tried_discovery:
+        if err.kind == "model" and p in ("gemini", "groq") and not tried_discovery:
             tried_discovery = True
-            found = discover_gemini_model(cfg("GEMINI_API_KEY"))
+            found = (discover_gemini_model(cfg("GEMINI_API_KEY")) if p == "gemini"
+                     else discover_groq_model(cfg("GROQ_API_KEY")))
             if found and found != payload["model"]:
                 payload["model"] = found
                 continue

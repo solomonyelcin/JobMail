@@ -347,3 +347,32 @@ def test_gemini_drops_reasoning_option_if_rejected(app, monkeypatch):
         return R(200, {"choices": [{"message": {"content": "OK"}}]})
     monkeypatch.setattr(ai.requests, "post", post)
     assert ai.complete(cfg, "s", "u", "gemini-x") == "OK" and sent == [True, False]
+
+
+def test_groq_model_autodiscovery(app, monkeypatch):
+    from app import ai
+    ai._GROQ_PICK.clear()
+    app.config["GROQ_API_KEY"] = "gq"
+    app.config["GEMINI_API_KEY"] = ""
+    cfg = lambda k: app.config.get(k, "")
+    calls = []
+
+    class R:
+        def __init__(self, code, body): self.status_code, self._b = code, body
+        def json(self): return self._b
+
+    def post(url, headers, json, timeout):
+        calls.append(json["model"])
+        if json["model"] == "llama-3.3-70b-versatile":
+            return R(404, {"error": {"message": "The model does not exist"}})
+        return R(200, {"choices": [{"message": {"content": "OK"}}]})
+
+    def get(url, headers, timeout):
+        return R(200, {"data": [{"id": "whisper-large-v3"}, {"id": "llama-guard-4-12b"},
+                                {"id": "meta-llama/llama-4-scout-17b-16e-instruct"}, {"id": "openai/gpt-oss-120b"}]})
+    monkeypatch.setattr(ai.requests, "post", post)
+    monkeypatch.setattr(ai.requests, "get", get)
+    assert ai.provider(cfg) == "groq"
+    assert ai.complete(cfg, "s", "u", ai.model_for(cfg, "analyze")) == "OK"
+    assert calls[-1] == "openai/gpt-oss-120b" and ai.model_for(cfg, "compose") == "openai/gpt-oss-120b"
+    ai._GROQ_PICK.clear()
