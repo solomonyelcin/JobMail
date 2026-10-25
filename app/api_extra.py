@@ -167,9 +167,9 @@ def compose(email_id):
                                str(d.get("instructions", ""))[:300])
     except ai.AIError as exc:
         current_app.logger.error("AI compose failed: kind=%s status=%s detail=%s", exc.kind, exc.status, exc.detail)
-        return jsonify(error="ai_failed", kind=exc.kind, help=ai.HELP.get(exc.kind, "")), 502
+        return jsonify(error="ai_failed", kind=exc.kind, help=ai.help_text(exc.kind, cfg)), 502
     except (requests.RequestException, ValueError):
-        return jsonify(error="ai_failed", kind="bad_reply", help=ai.HELP["bad_reply"]), 502
+        return jsonify(error="ai_failed", kind="bad_reply", help=ai.help_text("bad_reply", cfg)), 502
     to = mailbuild.first_address(row["reply_to"] or row["sender"])
     subject = out["subject"] or row["subject"]
     if not re.match(r"(?i)^re:", subject):

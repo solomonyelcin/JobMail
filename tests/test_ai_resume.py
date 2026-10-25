@@ -279,3 +279,23 @@ def test_ai_connection_test_endpoint(app, auth_client, monkeypatch):
     monkeypatch.setattr(ai_mod.requests, "post", lambda *a, **k: Ok())
     assert auth_client.post("/api/ai/test", json={}).get_json()["ok"] is True
     assert auth_client.get("/api/stats").get_json()["ai_error"] is None
+
+
+def test_gemini_provider_free_path(app, monkeypatch):
+    from app import ai
+    app.config["GEMINI_API_KEY"] = "g-key"
+    cfg = lambda k: app.config.get(k, "")
+    assert ai.enabled(cfg) and ai.provider(cfg) == "gemini" and ai.model_for(cfg, "analyze") == "gemini-2.5-flash"
+    seen = {}
+
+    class R:
+        status_code = 200
+        def json(self): return {"choices": [{"message": {"content": "OK"}}]}
+
+    def post(url, headers, json, timeout):
+        seen.update(url=url, auth=headers["Authorization"], model=json["model"])
+        return R()
+    monkeypatch.setattr(ai.requests, "post", post)
+    assert ai.complete(cfg, "s", "u", "gemini-2.5-flash") == "OK"
+    assert "generativelanguage" in seen["url"] and seen["auth"] == "Bearer g-key"
+    assert "Google Gemini" in ai.help_text("billing", cfg)

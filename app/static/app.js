@@ -246,7 +246,7 @@ async function boot() {
   if (!me.authenticated) return showLogin();
   S.statuses = me.statuses; S.categories = me.categories;
   S.lastSync = me.last_sync_at ? parseTs(me.last_sync_at) : null;
-  S.aiEnabled = !!me.ai_enabled; S.canDraft = !!me.can_draft;
+  S.aiEnabled = !!me.ai_enabled; S.aiProvider = me.ai_provider || ""; S.canDraft = !!me.can_draft;
   fillSelect($("fStatus"), S.statuses); fillSelect($("statusFilter"), S.statuses, "All statuses");
   buildLabelNav();
   $("login").classList.add("hidden"); $("appShell").classList.remove("hidden");
@@ -680,7 +680,7 @@ async function loadProfile() {
   $("resumeDownload").classList.toggle("hidden", !p.resume); $("resumeDelete").classList.toggle("hidden", !p.resume);
   $("aiStatus").textContent = (S.aiEnabled
     ? "AI is on: emails are sorted, openings are scored against your profile and replies can be drafted."
-    : "AI is off. To enable it, add an ANTHROPIC_API_KEY environment variable on your host (see docs/DEPLOYMENT.md).") +
+    : "AI is off. To turn it on for free, create a Gemini API key at aistudio.google.com and add it as GEMINI_API_KEY on your host (see docs/DEPLOYMENT.md, section 9).") +
     (S.canDraft ? "" : " Reply drafts need one more Google permission.");
   $("reanalyzeBtn").classList.toggle("hidden", !S.aiEnabled); $("aiTestBtn").classList.toggle("hidden", !S.aiEnabled);
   $("reconnectBtn").classList.toggle("hidden", S.canDraft);
@@ -710,7 +710,7 @@ $("reanalyzeBtn").addEventListener("click", () => { S.aiWarned = {}; runAnalysis
 $("rescanBtn").addEventListener("click", () => { toast("Rescanning the last 3 months…"); sync({ rescan: true }); });
 async function testAI() {
   const box = $("aiTestResult"), btn = $("aiTestBtn"); btn.disabled = true;
-  box.classList.remove("hidden"); box.replaceChildren(el("div", "test-line", "Testing the connection to Anthropic…"));
+  box.classList.remove("hidden"); box.replaceChildren(el("div", "test-line", "Testing the AI connection…"));
   try {
     const r = await api("POST", "/api/ai/test", {});
     box.replaceChildren();

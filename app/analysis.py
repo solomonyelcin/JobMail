@@ -23,7 +23,7 @@ def analyze_pending(db, cfg, limit):
     Returns {"analyzed", "removed", "errors", "remaining"}; call again while remaining > 0.
     """
     # worker threads have no Flask app context, so read the settings they need up front
-    settings = {k: cfg(k) for k in ("ANTHROPIC_API_KEY", "AI_MODEL", "AI_COMPOSE_MODEL")}
+    settings = {k: cfg(k) for k in ai.SETTING_KEYS}
     conn = db.connect()
     try:
         ptxt = profile_text(conn)
@@ -70,7 +70,7 @@ def analyze_pending(db, cfg, limit):
         conn.commit()
         remaining = conn.one("SELECT COUNT(*) AS n FROM emails WHERE ai_status=''")["n"]
         return {"analyzed": analyzed, "removed": removed, "errors": errors, "remaining": remaining,
-                "error_kind": first_kind, "help": ai.HELP.get(first_kind, "")}
+                "error_kind": first_kind, "help": ai.help_text(first_kind, settings.__getitem__)}
     except Exception:
         conn.rollback()
         raise

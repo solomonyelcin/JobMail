@@ -111,14 +111,14 @@ The first request after idle takes up to ~1 minute on Render's free plan while t
 
 ## 9. Optional: AI sorting, best matches and reply drafts
 
-1. Create an API key at https://console.anthropic.com (add billing credit and set a monthly spend limit there). Usage is billed per email analysed; a few hundred emails is typically a small amount.
-2. In Render, open the service **Environment** and add `ANTHROPIC_API_KEY` with the key. Save (the service restarts).
+1. Get an AI key. **Free option (recommended):** sign in at https://aistudio.google.com/apikey with your Google account and press **Create API key**. No card is needed; the free tier has daily limits, so a large first scan may finish over a few runs. Alternatives: a free Groq key (https://console.groq.com/keys, variable `GROQ_API_KEY`) or a paid Anthropic key (`ANTHROPIC_API_KEY`).
+2. In Render, open the service **Environment** and add `GEMINI_API_KEY` with the key (or the variable for the provider you chose). Save (the service restarts). If several keys are set, free providers are preferred; force one with `AI_PROVIDER` (`gemini`, `groq`, `openrouter`, `anthropic`).
 3. In Google Cloud, open the OAuth consent screen / **Data access** and add the scope `https://www.googleapis.com/auth/gmail.compose` next to `gmail.readonly`. This lets JobMail create reply drafts.
 4. In JobMail, press **Sign out**, then **Sign in with Google** again and accept the extra permission. (The Profile page shows a "Re-connect Google" button if drafts are not allowed yet.)
 5. Open the **Profile** tab: upload your resume and review the profile text, then press **Rescan last 3 months**.
 6. Check **Best matches** and try **Reply with AI** on an email.
 
-Without `ANTHROPIC_API_KEY` everything else still works with the built-in rules.
+Without an AI key everything else still works with the built-in rules.
 
 ## Troubleshooting
 
@@ -130,7 +130,7 @@ Without `ANTHROPIC_API_KEY` everything else still works with the built-in rules.
 | Asked to sign in again every week | Publishing status is still **Testing**; set it to **In production** (step 5.4). |
 | `/healthz` returns 500 | Check `DATABASE_URL` and that Neon is reachable; see Render logs. |
 | "Re-connect Google" shown / draft fails with a permission message | Add the `gmail.compose` scope in Google Cloud (section 9, step 3), then sign out and in again. |
-| AI features missing | `ANTHROPIC_API_KEY` is not set on Render. |
+| AI features missing | No AI key (`GEMINI_API_KEY`, `GROQ_API_KEY` or `ANTHROPIC_API_KEY`) is set on Render. |
 | Fewer emails than expected | Use Profile > **Rescan last 3 months**. Only the last 90 days are read. |
 | Deploy job skipped | `RENDER_DEPLOY_HOOK_URL` secret is not set (step 6). |
 | Login loop on phone | `BASE_URL` must be the exact `https://` URL you open, not `http://`. |

@@ -122,7 +122,7 @@ def me():
         return jsonify(authenticated=False)
     acct = conn().one("SELECT last_sync_at, scope FROM accounts WHERE email=?", (email,))
     return jsonify(authenticated=True, email=email, last_sync_at=acct["last_sync_at"] if acct else None,
-                   statuses=STATUSES, categories=CATEGORIES, ai_enabled=ai.enabled(cfg),
+                   statuses=STATUSES, categories=CATEGORIES, ai_enabled=ai.enabled(cfg), ai_provider=ai.label(cfg) if ai.enabled(cfg) else "",
                    can_draft=bool(acct and "gmail.compose" in (acct["scope"] or "")), sync_days=cfg("SYNC_DAYS"))
 
 
@@ -398,4 +398,4 @@ def stats():
     return jsonify(applications=apps, emails=cats, total_emails=sum(cats.values()),
                    total_applications=sum(apps.values()), weekly=weekly, stale=stale,
                    unread=unread, pending_ai=pending_ai, strong_matches=matches,
-                   ai_error={"kind": err_kind, "help": ai.HELP.get(err_kind, "")} if err_kind else None)
+                   ai_error={"kind": err_kind, "help": ai.help_text(err_kind, cfg)} if err_kind else None)

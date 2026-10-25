@@ -1,6 +1,6 @@
-"""Claude API helpers: classify emails, score job fit, and compose replies.
+"""AI helpers: classify emails, score job fit, and compose replies.
 
-Only used when ANTHROPIC_API_KEY is set. Email text is untrusted data: prompts tell the model never to follow
+Only used when an AI key is set (free: GEMINI_API_KEY or GROQ_API_KEY; paid: ANTHROPIC_API_KEY). Email text is untrusted data: prompts tell the model never to follow
 instructions found in it, the output must be JSON, and every field is validated before it is stored.
 """
 import json
@@ -10,6 +10,46 @@ import time
 import requests
 
 API_URL = "https://api.anthropic.com/v1/messages"
+
+# Free-tier friendly providers all speak the OpenAI chat format.
+# name: (key setting, endpoint, analysis model, reply model, label)
+OPENAI_STYLE = {
+    "gemini": ("GEMINI_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+               "gemini-2.5-flash", "gemini-2.5-flash", "Google Gemini"),
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1/chat/completions",
+             "llama-3.3-70b-versatile", "llama-3.3-70b-versatile", "Groq"),
+    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1/chat/completions",
+                   "meta-llama/llama-3.3-70b-instruct:free", "meta-llama/llama-3.3-70b-instruct:free", "OpenRouter"),
+}
+ANTHROPIC_DEFAULTS = ("claude-haiku-5-5", "claude-sonnet-5-5")
+SETTING_KEYS = ("AI_PROVIDER", "AI_MODEL", "AI_COMPOSE_MODEL", "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
+
+
+def provider(cfg) -> str:
+    """The AI provider in use: AI_PROVIDER if set, else the first one that has a key (free ones first)."""
+    want = (cfg("AI_PROVIDER") or "").strip().lower()
+    if want in OPENAI_STYLE or want == "anthropic":
+        return want
+    for name, spec in OPENAI_STYLE.items():
+        if cfg(spec[0]):
+            return name
+    return "anthropic" if cfg("ANTHROPIC_API_KEY") else ""
+
+
+def label(cfg) -> str:
+    p = provider(cfg)
+    return OPENAI_STYLE[p][4] if p in OPENAI_STYLE else "Anthropic"
+
+
+def model_for(cfg, role: str) -> str:
+    """role is "analyze" or "compose". An explicit AI_MODEL / AI_COMPOSE_MODEL always wins."""
+    explicit = cfg("AI_MODEL" if role == "analyze" else "AI_COMPOSE_MODEL")
+    if explicit:
+        return explicit
+    p = provider(cfg)
+    i = 0 if role == "analyze" else 1
+    return OPENAI_STYLE[p][2 + i] if p in OPENAI_STYLE else ANTHROPIC_DEFAULTS[i]
 CATEGORIES = ("applied", "assessment", "interview", "offer", "rejected", "opening", "recruiter")
 
 
@@ -21,25 +61,33 @@ class AIError(Exception):
         self.kind, self.detail, self.status = kind, detail, status
 
 
-HELP = {
-    "auth": "Anthropic rejected the API key. Check that ANTHROPIC_API_KEY on your host is copied exactly (no spaces) and is still active.",
-    "permission": "The API key is not allowed to use this model. Check the key's workspace and permissions at console.anthropic.com.",
-    "billing": "Your Anthropic account has no usable credit. Add credit under Billing at console.anthropic.com, then try again.",
-    "model": "Anthropic does not recognise the AI model name. Check AI_MODEL / AI_COMPOSE_MODEL on your host, or remove them to use the defaults.",
-    "rate_limit": "Anthropic is rate-limiting requests. Wait a minute and try again.",
-    "overloaded": "Anthropic is busy right now. Try again in a few minutes.",
-    "network": "JobMail could not reach Anthropic. Try again in a moment.",
-    "bad_request": "Anthropic rejected the request. Check the model names and your account status.",
+_HELP = {
+    "auth": "{p} rejected the API key. Check that the key on your host is copied exactly (no spaces) and is still active.",
+    "permission": "The API key is not allowed to use this model. Check the key's permissions with {p}.",
+    "billing": "{p} says this account has no usable credit or quota. Add credit, or switch to a free provider (set GEMINI_API_KEY), then try again.",
+    "model": "{p} does not recognise the AI model name. Check AI_MODEL / AI_COMPOSE_MODEL on your host, or remove them to use the defaults.",
+    "rate_limit": "{p} is rate-limiting requests (free plans have low limits). Wait a minute and try again.",
+    "overloaded": "{p} is busy right now. Try again in a few minutes.",
+    "network": "JobMail could not reach {p}. Try again in a moment.",
+    "bad_request": "{p} rejected the request. Check the model names and your account status.",
     "bad_reply": "The AI returned an unexpected reply. Try again.",
 }
 # problems the user must fix; emails are left pending (not marked as failed) until they do
+
+
+def help_text(kind, cfg=None, name=None):
+    return _HELP.get(kind, "").format(p=name or (label(cfg) if cfg else "The AI provider"))
+
+
 FATAL = {"auth", "permission", "billing", "model"}
 
 
 def _error_from_response(r) -> AIError:
     detail = ""
     try:
-        detail = str(((r.json() or {}).get("error") or {}).get("message", ""))[:300]
+        body = r.json()
+        body = body[0] if isinstance(body, list) and body else body
+        detail = str(((body or {}).get("error") or {}).get("message", ""))[:300]
     except ValueError:
         pass
     low, code = detail.lower(), r.status_code
@@ -50,9 +98,11 @@ def _error_from_response(r) -> AIError:
     elif code == 404:
         kind = "model"
     elif code == 429:
-        kind = "rate_limit"
+        kind = "billing" if ("credit" in low or "billing" in low or "insufficient" in low) else "rate_limit"
     elif code >= 500:
         kind = "overloaded"
+    elif code == 400 and ("api key" in low or "api_key" in low):
+        kind = "auth"
     elif code == 400 and ("credit" in low or "billing" in low):
         kind = "billing"
     else:
@@ -61,24 +111,39 @@ def _error_from_response(r) -> AIError:
 
 
 def enabled(cfg) -> bool:
-    return bool(cfg("ANTHROPIC_API_KEY"))
+    return bool(provider(cfg))
 
 
 def complete(cfg, system: str, user: str, model: str, max_tokens: int = 600) -> str:
-    """Call the Anthropic Messages API and return the text of the reply."""
-    headers = {"x-api-key": cfg("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json"}
-    payload = {"model": model, "max_tokens": max_tokens, "system": system,
-               "messages": [{"role": "user", "content": user}]}
+    """Call the configured provider and return the text of the reply."""
+    p = provider(cfg)
+    if p in OPENAI_STYLE:
+        spec = OPENAI_STYLE[p]
+        url = spec[1]
+        headers = {"Authorization": "Bearer " + cfg(spec[0]), "content-type": "application/json"}
+        payload = {"model": model, "max_tokens": max_tokens + (800 if p == "gemini" else 0),
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    else:
+        url = API_URL
+        headers = {"x-api-key": cfg("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        payload = {"model": model, "max_tokens": max_tokens, "system": system,
+                   "messages": [{"role": "user", "content": user}]}
     last = None
     for attempt in range(3):
         try:
-            r = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
         except requests.RequestException as exc:
             last = AIError("network", exc.__class__.__name__)
             time.sleep(1.0 * (attempt + 1))
             continue
         if r.status_code == 200:
-            return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+            data = r.json()
+            if p in OPENAI_STYLE:
+                try:
+                    return data["choices"][0]["message"]["content"] or ""
+                except (KeyError, IndexError, TypeError):
+                    raise AIError("bad_reply", "no choices in reply")
+            return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         err = _error_from_response(r)
         if err.kind in ("rate_limit", "overloaded") and attempt < 2:
             last = err
@@ -108,12 +173,12 @@ def _json(text: str) -> dict:
 def check_models(cfg):
     """Send a tiny request to each configured model. Returns [{"model", "ok", "kind", "help"}]."""
     out = []
-    for model in dict.fromkeys([cfg("AI_MODEL"), cfg("AI_COMPOSE_MODEL")]):
+    for model in dict.fromkeys([model_for(cfg, "analyze"), model_for(cfg, "compose")]):
         try:
             complete(cfg, "Reply with the single word OK.", "ping", model, 5)
             out.append({"model": model, "ok": True, "kind": "", "help": ""})
         except AIError as exc:
-            out.append({"model": model, "ok": False, "kind": exc.kind, "help": HELP.get(exc.kind, "")})
+            out.append({"model": model, "ok": False, "kind": exc.kind, "help": help_text(exc.kind, cfg)})
     return out
 
 
@@ -146,7 +211,7 @@ def analyze_email(cfg, email: dict, profile_text: str) -> dict:
         "\nDate: " + _s(email.get("received_at"), 30) +
         "\nBody:\n" + (email.get("body_text") or email.get("snippet") or "")[:3500]
     )
-    data = _json(complete(cfg, ANALYZE_SYSTEM, user, cfg("AI_MODEL"), 400))
+    data = _json(complete(cfg, ANALYZE_SYSTEM, user, model_for(cfg, "analyze"), 400))
     is_job = bool(data.get("is_job"))
     cat = str(data.get("category", "")).lower()
     if is_job and cat not in CATEGORIES:
@@ -185,7 +250,7 @@ def compose_reply(cfg, email: dict, application: dict | None, full_name: str, pr
         "\nSubject: " + _s(email.get("subject"), 250) +
         "\nBody:\n" + (email.get("body_text") or email.get("snippet") or "")[:3500]
     )
-    data = _json(complete(cfg, COMPOSE_SYSTEM, user, cfg("AI_COMPOSE_MODEL"), 700))
+    data = _json(complete(cfg, COMPOSE_SYSTEM, user, model_for(cfg, "compose"), 700))
     subject = _s(data.get("subject"), 200)
     body = str(data.get("body") or "").strip()[:4000]
     if not body:
