@@ -7,12 +7,20 @@ A personal web app that reads your Gmail, keeps **only job-related emails**, cla
 Switch workspace from the menu at the top of the sidebar:
 
 - **Job**: everything below (applications, AI job matches, reply drafts).
-- **Banking**: reads transaction alerts, card statements and EMI/loan reminders from your banks. Shows income vs spending by month, spending by category, top merchants, upcoming bills and EMIs, loans and last-seen balances, with a transactions table where you can fix categories (a fix applies to every transaction from the same merchant). Amounts are parsed by rules; with AI on, anything the rules cannot categorise is categorised in batches, and "Get AI insights" writes a short commentary. Duplicate alerts for one payment (bank + UPI app) are counted once.
+- **Banking**: reads transaction alerts, card statements and EMI/loan reminders from your banks.
+  - Overview: income vs spending by month, period selector (this/last month, 30 to 365 days) with comparison to the previous period, savings rate, average daily spend, this-month projection, categories, top merchants, income sources, spending by weekday and channel, largest payments.
+  - Bills and EMIs: upcoming dues with overdue flags, loans and last-seen balances.
+  - Recurring payments and subscriptions are detected automatically, and unusual payments are flagged.
+  - Monthly budgets per category with warnings before you overspend.
+  - Credit-card bill payments are not counted as spending (the purchases already were), and duplicate alerts for one payment are counted once (by reference number, then day and amount).
+  - Transactions: rename a merchant, change a category (applies to the same merchant), or exclude a transaction.
+  - AI (optional): categorises what the rules cannot, "Get AI insights", and "Ask about your money" answers questions from your own figures.
+  - **Re-analyse bank emails** re-reads stored mail with the latest parser (also runs automatically when parser rules change). The parser is tuned on common Indian bank formats; if a bank is misread, report the sender.
 - **Personal**: mail from people you add (family, friends), messages you star in Gmail, and mail Gmail marks as important (promotions excluded). Filters for unread, needs reply (AI), family and friends. Job and bank mail stays out.
 
 ## Features
 
-- **Gmail-style interface**: left sidebar (Inbox, Unread, Best matches, Board, Applications, colour labels), pill search bar, reading pane, 6 colour themes plus light/dark/auto and 3 densities (palette button), and a **Tour** button next to Sign out that walks through the app (also runs on first visit).
+- **Gmail-style interface**: left sidebar (Inbox, Unread, Best matches, Board, Applications, colour labels), pill search bar, reading pane, 6 colour themes, 5 blurred scene themes (Aurora, Dusk, Beach, City night, Bokeh), your own photo background with blur and darkness sliders, 3 high-contrast themes (black on white, white on black, yellow on black), plus light/dark/auto and 3 densities (palette button), and a **Tour** button next to Sign out that walks through the app (also runs on first visit).
 - **AI diagnostics**: if AI fails, a banner and the sidebar chip say why (no credit, bad key, model name). Profile > **Test AI connection** checks the key and models.
 - **Gmail sign-in** with Google OAuth. Only the one account in `ALLOWED_EMAIL` can log in.
 - **Automatic sync**: runs when you open the app, when you return to the tab, and every 5 minutes while it is open. After the first full sync, later syncs only look back to just before the previous one, and messages are fetched in parallel, so they are quick. A manual **Sync** button is still there.

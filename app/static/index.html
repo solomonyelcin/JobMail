@@ -45,8 +45,9 @@
     </header>
 
     <div id="themePop" class="popover hidden" role="dialog" aria-label="Theme and density">
-      <h4>Theme</h4>
-      <div id="swatches" class="swatches"></div>
+      <div id="swatches" class="theme-groups"></div>
+      <h4>Your photo background</h4>
+      <div id="photoRow" class="photo-row"></div>
       <h4>Display density</h4>
       <div id="densityRow" class="density"></div>
     </div>
@@ -183,6 +184,7 @@
                 <h2 class="view-title" id="bankTitle">Banking overview</h2>
                 <span class="spacer"></span>
                 <select id="bankRange" aria-label="Time range">
+                  <option value="mtd">This month</option><option value="lm">Last month</option>
                   <option value="30">Last 30 days</option><option value="90" selected>Last 3 months</option>
                   <option value="180">Last 6 months</option><option value="365">Last 12 months</option>
                 </select>

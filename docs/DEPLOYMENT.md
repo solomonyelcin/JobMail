@@ -124,6 +124,8 @@ Without an AI key everything else still works with the built-in rules.
 
 The app is called SmartMail in the interface. Your GitHub repo and Render service keep their old names (renaming them would change your URLs and break the deploy hook), which is fine. To also change what Google shows on the sign-in screen, open Google Cloud > **OAuth consent screen / Branding** and change the app name to SmartMail. No new Google permission is needed for the Banking and Personal workspaces.
 
+After deploying the banking update: open Banking, press Sync once, then **Re-analyse bank emails** (it also happens automatically on first start), and set budgets under Monthly budgets. Themes are in the palette button.
+
 ## Troubleshooting
 
 | Symptom | Fix |

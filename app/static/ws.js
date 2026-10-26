@@ -181,7 +181,17 @@ async function loadWsStats() {
   }
   return s;
 }
-$("bankRange").addEventListener("change", () => { S.bankDays = Number($("bankRange").value); loadBankDashboard(); });
+$("bankRange").addEventListener("change", () => { S.bankRange = $("bankRange").value; store("jm-bank-range", S.bankRange); loadBankDashboard(); });
+S.bankRange = store("jm-bank-range") || "90"; $("bankRange").value = S.bankRange;
+const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// query-string part describing the chosen period
+function periodQuery() {
+  const now = new Date(), r = S.bankRange;
+  if (r === "mtd") return `from=${isoDate(new Date(now.getFullYear(), now.getMonth(), 1))}&to=${isoDate(now)}`;
+  if (r === "lm") return `from=${isoDate(new Date(now.getFullYear(), now.getMonth() - 1, 1))}&to=${isoDate(new Date(now.getFullYear(), now.getMonth(), 0))}`;
+  return "days=" + (Number(r) || 90);
+}
+const periodDays = () => ({ mtd: 31, lm: 31 }[S.bankRange] || Number(S.bankRange) || 90);
 
 // ---------- Banking: charts ----------
 function barChart(monthly, cur) {
@@ -234,22 +244,32 @@ function kpi(parent, label, value, sub, cls) {
 function panel(title, ...kids) { const p = el("section", "panel"); p.append(el("h3", "", title), ...kids); return p; }
 
 // ---------- Banking: dashboard ----------
+function deltaText(pct, goodWhenDown) {
+  if (pct === null || pct === undefined) return "";
+  const up = pct > 0, good = goodWhenDown ? !up : up;
+  return `${up ? "▲" : "▼"} ${Math.abs(pct)}% vs previous period` + (pct === 0 ? "" : good ? "" : "");
+}
 async function loadBankDashboard() {
   const box = $("bankBody"); skeleton(box, 4);
-  const s = await api("GET", "/api/bank/summary?days=" + S.bankDays);
+  const s = await api("GET", "/api/bank/summary?" + periodQuery());
   if (S.view !== "bank:dashboard") return;
-  box.replaceChildren();
+  S.bankCats = s.categories; box.replaceChildren();
   const cur = s.currency, t = s.totals;
   if (!t.count && !s.upcoming.length) {
     box.append(emptyState("bank", "No banking emails yet", "SmartMail looks for transaction alerts, statements and EMI reminders from your banks in Gmail. Press sync to look now.", "Sync now", () => sync({})));
     return;
   }
+  if (s.due_soon.count) {
+    const al = el("div", "banner soft"); al.append(ic("alert"), el("div", "banner-text", `${s.due_soon.count} payment${s.due_soon.count === 1 ? "" : "s"} due in the next 7 days, ${money(s.due_soon.total, cur)} in total.`));
+    const b = el("button", "btn small", "View"); b.addEventListener("click", () => setView("bank:bills")); al.append(b); box.append(al);
+  }
   const ins = el("div", "insights"); box.append(ins);
-  kpi(ins, "Income", money(t.credit, cur), "credited in this period", "pos");
-  kpi(ins, "Spending", money(t.debit, cur), `${t.count} transactions`, "neg");
-  kpi(ins, "Net", (t.net >= 0 ? "+" : "−") + money(Math.abs(t.net), cur), t.net >= 0 ? "you saved this much" : "spent more than you earned", t.net >= 0 ? "pos" : "neg");
+  kpi(ins, "Income", money(t.credit, cur), deltaText(s.vs_previous.credit_pct, false) || "credited in this period", "pos");
+  kpi(ins, "Spending", money(t.debit, cur), deltaText(s.vs_previous.debit_pct, true) || `${t.count} transactions`, "neg");
+  kpi(ins, "Net", (t.net >= 0 ? "+" : "−") + money(Math.abs(t.net), cur), t.savings_rate === null ? "" : t.net >= 0 ? `${t.savings_rate}% of income kept` : "spent more than you earned", t.net >= 0 ? "pos" : "neg");
   kpi(ins, "EMIs per month", money(t.emi_monthly, cur), s.loans.length ? `${s.loans.length} loan${s.loans.length === 1 ? "" : "s"} detected` : "none detected");
-  kpi(ins, "Average per day", money(t.avg_daily_spend, cur), "spending");
+  kpi(ins, "Average per day", money(t.avg_daily_spend, cur), t.card_bills_paid ? `card bills paid ${money(t.card_bills_paid, cur, true)} (not counted)` : "spending");
+  if (s.month.projection) kpi(ins, "This month so far", money(s.month.spent, cur), `on track for about ${money(s.month.projection, cur, true)}`);
 
   const g1 = el("div", "two-col"); box.append(g1);
   const chartPanel = panel("Income vs spending");
@@ -260,6 +280,8 @@ async function loadBankDashboard() {
   s.upcoming.slice(0, 5).forEach((u) => up.append(dueRow(u)));
   if (s.upcoming.length) { const more = el("button", "link", "See all bills & EMIs"); more.addEventListener("click", () => setView("bank:bills")); up.append(more); }
   g1.append(up);
+
+  box.append(budgetPanel(s));
 
   const g2 = el("div", "two-col even"); box.append(g2);
   const catPanel = panel("Where your money went");
@@ -282,7 +304,18 @@ async function loadBankDashboard() {
   if (s.income.length) rightCol.append(panel("Income sources", hbars(s.income, cur, "pos")));
   g2.append(rightCol);
 
-  // insights
+  const g3 = el("div", "two-col even"); box.append(g3);
+  g3.append(recurringPanel(s));
+  const right3 = el("div", "stack");
+  right3.append(weekdayPanel(s), largestPanel(s));
+  g3.append(right3);
+  if (s.unusual.length) {
+    const up2 = panel("Unusually large payments");
+    s.unusual.forEach((u) => { const r = el("div", "due-row"), l = el("div", "due-main"); l.append(el("b", "", u.merchant || u.category), el("div", "muted small", `${fmtDate(u.date)} · ${u.times_usual}x your usual ${u.category.toLowerCase()} payment`)); r.append(l, el("span", "amt", money(u.amount, cur))); up2.append(r); });
+    box.append(up2);
+  }
+
+  // insights + AI
   const ip = panel("Insights"); ip.classList.add("insight-panel");
   const list = el("ul", "bullets");
   s.insights.forEach((x) => list.append(el("li", "", x)));
@@ -300,14 +333,90 @@ async function loadBankDashboard() {
     const btn = el("button", "btn small", s.ai_insights ? "Refresh AI insights" : "Get AI insights");
     btn.addEventListener("click", async () => {
       btn.disabled = true; btn.textContent = "Thinking…";
-      try { fillAi(await api("POST", "/api/bank/insights", { days: S.bankDays })); btn.textContent = "Refresh AI insights"; }
+      try { fillAi(await api("POST", "/api/bank/insights", { days: periodDays() })); btn.textContent = "Refresh AI insights"; }
       catch (err) { btn.textContent = "Try again"; toast((err.data && err.data.help) || err.message, "error"); }
       btn.disabled = false;
     });
     ai.append(btn);
   }
-  ip.append(ai); box.append(ip);
-  box.append(el("p", "muted small fine", "Figures come from the amounts in your bank emails. Duplicate alerts for one payment are counted once. Transfers between your own accounts can inflate both income and spending."));
+  ip.append(ai);
+  if (S.aiEnabled) ip.append(askBox());
+  box.append(ip);
+
+  const tools = el("div", "row wrap tools-row");
+  const re = el("button", "btn small", "Re-analyse bank emails");
+  re.title = "Read all stored bank emails again with the latest rules. Your category edits are kept.";
+  re.addEventListener("click", async () => {
+    re.disabled = true; re.textContent = "Working…";
+    try { const r = await api("POST", "/api/bank/reparse", {}); toast(`Re-read ${r.checked} emails, ${r.removed} removed`, "ok"); loadBankDashboard(); }
+    catch (err) { toast(err.message, "error"); re.disabled = false; re.textContent = "Re-analyse bank emails"; }
+  });
+  const exp = el("a", "btn small", "Download CSV"); exp.href = "/api/bank/export.csv";
+  tools.append(re, exp); box.append(tools);
+  box.append(el("p", "muted small fine", "Figures come from the amounts in your bank emails. Duplicate alerts for one payment are counted once, and paying a credit card bill is not counted as spending (the card purchases already are). Transfers between your own accounts can still inflate income and spending: use the exclude button on a transaction to remove them."));
+}
+function budgetPanel(s) {
+  const p = panel("Monthly budgets"); const cur = s.currency;
+  p.append(el("p", "muted small", "Spending this calendar month against the limits you set."));
+  if (!s.budgets.length) p.append(el("p", "muted", "No budgets yet. Set a limit for a category to get a warning before you overspend."));
+  s.budgets.forEach((b) => {
+    const row = el("div", "budget"), head = el("div", "budget-head");
+    head.append(el("b", "", b.category), el("span", "muted small", `${money(b.spent, cur)} of ${money(b.limit, cur)}`));
+    const track = el("div", "track"), fill = el("div", "fill " + (b.pct >= 100 ? "over" : b.pct >= 80 ? "warn" : "ok"));
+    fill.style.width = Math.min(100, b.pct) + "%"; track.append(fill);
+    const note = el("div", "small " + (b.pct >= 100 ? "neg" : "muted"), b.pct >= 100 ? `Over budget by ${money(-b.remaining, cur)}` : `${money(b.remaining, cur)} left · ${b.pct}% used`);
+    const edit = el("button", "link small", "Change"); edit.addEventListener("click", () => setBudget(b.category, b.limit));
+    head.append(edit); row.append(head, track, note); p.append(row);
+  });
+  const add = el("div", "row"); const sel = el("select"); sel.setAttribute("aria-label", "Category");
+  (s.categories || []).filter((c) => !["Credit card payment", "Other", "Salary", "Refund", "Interest", "Transfer in", "Other income"].includes(c) && !s.budgets.some((b) => b.category === c))
+    .forEach((c) => { const o = el("option", "", c); o.value = c; sel.append(o); });
+  const btn = el("button", "btn small", "Set a budget"); btn.addEventListener("click", () => setBudget(sel.value, 0));
+  if (sel.options.length) add.append(sel, btn); p.append(add); return p;
+}
+async function setBudget(cat, current) {
+  const v = prompt(`Monthly budget for ${cat} (enter 0 to remove):`, current ? String(current) : "");
+  if (v === null) return; const n = Number(v.replace(/,/g, ""));
+  if (!isFinite(n) || n < 0) return toast("Enter a number", "error");
+  try { await api("PUT", "/api/bank/budgets", { category: cat, amount: n }); loadBankDashboard(); } catch (err) { toast(err.message, "error"); }
+}
+function recurringPanel(s) {
+  const p = panel("Recurring payments & subscriptions");
+  if (!s.recurring.length) { p.append(el("p", "muted", "Payments that repeat every month or week (Netflix, rent, SIPs) show up here once SmartMail has seen them 3 times.")); return p; }
+  const total = s.recurring.reduce((n, r) => n + r.monthly_cost, 0);
+  p.append(el("p", "muted small", `About ${money(total, s.currency)} a month in total.`));
+  s.recurring.slice(0, 8).forEach((r) => {
+    const row = el("div", "due-row"), l = el("div", "due-main");
+    l.append(el("b", "", r.merchant), el("span", "chip bill", r.every), el("div", "muted small", `${r.count} payments · next around ${fmtDate(r.next_date)}`));
+    row.append(l, el("span", "amt", money(r.amount, r.currency))); p.append(row);
+  });
+  return p;
+}
+function weekdayPanel(s) {
+  const p = panel("Spending by weekday"), names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const items = s.weekday.map((v, i) => ({ name: names[i], amount: v }));
+  if (!items.some((i) => i.amount)) { p.append(el("p", "muted", "Not enough data yet.")); return p; }
+  p.append(hbars(items, s.currency)); return p;
+}
+function largestPanel(s) {
+  const p = panel("Largest payments");
+  if (!s.largest.length) { p.append(el("p", "muted", "No spending yet.")); return p; }
+  s.largest.forEach((l) => { const r = el("div", "due-row"), d = el("div", "due-main"); d.append(el("b", "", l.merchant || l.category || "Payment"), el("div", "muted small", `${fmtDate(l.date)} · ${l.category}`)); r.append(d, el("span", "amt", money(l.amount, s.currency))); p.append(r); });
+  return p;
+}
+function askBox() {
+  const box = el("div", "ask"); box.append(el("h4", "", "Ask about your spending"));
+  const form = el("form", "ask-form"), inp = el("input"); inp.placeholder = "e.g. How much did I spend on food last month?"; inp.maxLength = 300; inp.setAttribute("aria-label", "Question");
+  const go = el("button", "btn primary small", "Ask"); go.type = "submit"; form.append(inp, go);
+  const out = el("div", "ask-out muted small");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); if (inp.value.trim().length < 3) return;
+    go.disabled = true; out.textContent = "Thinking…";
+    try { const r = await api("POST", "/api/bank/ask", { question: inp.value, days: periodDays() }); out.classList.remove("muted"); out.textContent = r.answer; }
+    catch (err) { out.classList.add("muted"); out.textContent = (err.data && err.data.help) || err.message; }
+    go.disabled = false;
+  });
+  box.append(form, out); return box;
 }
 function dueRow(u) {
   const r = el("div", "due-row" + (u.overdue ? " overdue" : ""));
@@ -323,6 +432,7 @@ async function loadBankBills() {
   const box = $("bankBody"); skeleton(box, 3);
   const s = await api("GET", "/api/bank/summary?days=365");
   if (S.view !== "bank:bills") return;
+  S.bankCats = s.categories;
   box.replaceChildren();
   const up = panel("Upcoming payments");
   if (!s.upcoming.length) up.append(el("p", "muted", "No upcoming bills or EMIs found. Statements and EMI reminders from your bank show up here."));
@@ -343,6 +453,7 @@ async function loadBankBills() {
     r.append(left, el("span", "amt", money(a.balance, a.currency))); ap.append(r);
   });
   box.append(ap);
+  if (s.by_account.length) box.append(panel("Spending by account or card (last 12 months)", hbars(s.by_account.map((a) => ({ name: "•••• " + a.name, amount: a.amount })), s.currency)));
 }
 
 // ---------- Banking: transactions ----------
@@ -388,7 +499,17 @@ function txRow(t) {
   });
   const amt = el("span", "amt " + (credit ? "pos" : future ? "" : "neg"), (credit ? "+" : future ? "" : "−") + money(t.amount, t.currency));
   const link = el("a", "icon-btn"); link.href = gmailLink(t.thread_id); link.target = "_blank"; link.rel = "noopener noreferrer"; link.title = "Open the email in Gmail"; link.append(icon("external"));
-  r.append(d, m, sel, amt, link); return r;
+  const ex = el("button", "icon-btn"); ex.title = "Not a real transaction, or a transfer between my own accounts: exclude it"; ex.append(icon("ban"));
+  ex.addEventListener("click", async () => {
+    if (!confirm("Exclude this from your totals? (Use this for transfers between your own accounts or alerts that are not real payments.)")) return;
+    try { await api("PATCH", "/api/bank/transactions/" + t.id, { excluded: true }); r.remove(); toast("Excluded from your totals", "ok"); loadWsStats(); } catch (err) { toast(err.message, "error"); }
+  });
+  const nm = m.firstChild; nm.classList.add("renamable"); nm.title = "Click to rename";
+  nm.addEventListener("click", async () => {
+    const v = prompt("Merchant name:", t.merchant || ""); if (v === null) return;
+    try { await api("PATCH", "/api/bank/transactions/" + t.id, { merchant: v }); nm.textContent = v || t.subject || "(no description)"; } catch (err) { toast(err.message, "error"); }
+  });
+  r.append(d, m, sel, amt, link, ex); return r;
 }
 
 // ---------- Personal ----------

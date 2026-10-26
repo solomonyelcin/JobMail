@@ -12,7 +12,7 @@ from . import ai, bank, wsai
 from .api import bp, conn, cfg, like_clause, login_required, is_unique_violation
 from .bank import ALL_CATEGORIES, build_summary
 from .sync import get_meta, now_iso, set_meta
-from .workspaces import RELATIONS, apply_people_change, run_ws_sync
+from .workspaces import RELATIONS, apply_people_change, reparse_bank, run_ws_sync
 
 PAGE = 30
 WS = ("bank", "personal")
@@ -102,16 +102,34 @@ def ws_stats():
 # ---------- banking ----------
 def _txn_rows(c, days=None):
     sql = ("SELECT t.id, t.txn_date, t.kind, t.amount, t.currency, t.merchant, t.spend_cat, t.channel, t.account,"
-           " t.balance, t.min_due, t.due_date, t.src FROM transactions t")
+           " t.balance, t.min_due, t.due_date, t.src, t.ref FROM transactions t WHERE t.excluded=0")
     return c.all(sql)
+
+
+def _budgets(c):
+    return {r["category"]: r["amount"] for r in c.all("SELECT category, amount FROM budgets")}
+
+
+def _period_args():
+    """Validated (days, start, end) from the query string."""
+    start, end = request.args.get("from", ""), request.args.get("to", "")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+        try:
+            datetime.strptime(start, "%Y-%m-%d")
+            datetime.strptime(end, "%Y-%m-%d")
+            if start <= end:
+                return 90, start, end
+        except ValueError:
+            pass
+    return max(7, min(int(request.args.get("days", 90) or 90), 365)), None, None
 
 
 @bp.get("/api/bank/summary")
 @login_required
 def bank_summary():
-    days = max(7, min(int(request.args.get("days", 90) or 90), 365))
-    s = build_summary(_txn_rows(conn()), days)
     c = conn()
+    days, start, end = _period_args()
+    s = build_summary(_txn_rows(c), days, start=start, end=end, budgets=_budgets(c))
     cached = get_meta(c, "bank_insights")
     try:
         s["ai_insights"] = json.loads(cached) if cached else None
@@ -121,13 +139,61 @@ def bank_summary():
     return jsonify(s)
 
 
+@bp.put("/api/bank/budgets")
+@login_required
+def bank_budget_set():
+    body = request.get_json(silent=True) or {}
+    cat = body.get("category")
+    try:
+        amount = float(body.get("amount", 0))
+    except (TypeError, ValueError):
+        return jsonify(error="invalid amount"), 400
+    if cat not in bank.SPEND_CATEGORIES or cat in bank.NON_SPEND or amount < 0 or amount > 1e9:
+        return jsonify(error="invalid budget"), 400
+    c = conn()
+    if amount == 0:
+        c.execute("DELETE FROM budgets WHERE category=?", (cat,))
+    else:
+        c.execute("INSERT INTO budgets (category, amount) VALUES (?,?) ON CONFLICT (category) DO UPDATE SET amount=excluded.amount",
+                  (cat, amount))
+    c.commit()
+    return jsonify(ok=True)
+
+
+@bp.post("/api/bank/reparse")
+@login_required
+def bank_reparse():
+    return jsonify(reparse_bank(current_app.extensions["jobmail_db"]))
+
+
+@bp.post("/api/bank/ask")
+@login_required
+def bank_ask():
+    if not ai.enabled(cfg):
+        return jsonify(error="ai_off", help="Turn on AI first (add an AI key on your host)."), 400
+    body = request.get_json(silent=True) or {}
+    q = re.sub(r"\s+", " ", str(body.get("question", ""))).strip()[:300]
+    if len(q) < 3:
+        return jsonify(error="Ask a question about your spending."), 400
+    c = conn()
+    days = max(7, min(int(body.get("days", 90) or 90), 365))
+    summary = build_summary(_txn_rows(c), days, budgets=_budgets(c))
+    recent = c.all("SELECT t.txn_date, t.kind, t.amount, t.merchant, t.spend_cat FROM transactions t WHERE t.excluded=0"
+                   " ORDER BY t.txn_date DESC LIMIT 80")
+    try:
+        answer = wsai.ask_bank(cfg, q, summary, recent)
+    except ai.AIError as exc:
+        return jsonify(error="ai_failed", kind=exc.kind, help=_ai_help(exc.kind)), 502
+    return jsonify(answer=answer)
+
+
 @bp.post("/api/bank/insights")
 @login_required
 def bank_insights():
     if not ai.enabled(cfg):
         return jsonify(error="ai_off", help="Turn on AI first (add an AI key on your host)."), 400
     days = max(7, min(int((request.get_json(silent=True) or {}).get("days", 90)), 365))
-    summary = build_summary(_txn_rows(conn()), days)
+    summary = build_summary(_txn_rows(conn()), days, budgets=_budgets(conn()))
     try:
         items = wsai.bank_insights(cfg, summary)
     except ai.AIError as exc:
@@ -141,9 +207,13 @@ def bank_insights():
 @bp.get("/api/bank/transactions")
 @login_required
 def bank_transactions():
-    where, params = ["1=1"], []
+    where, params = ["t.excluded=0"], []
+    start, end = request.args.get("from", ""), request.args.get("to", "")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+        where.append("t.txn_date >= ? AND t.txn_date <= ?")
+        params += [start + "T00:00:00Z", end + "T23:59:59Z"]
     for term in request.args.get("q", "").split():
-        cl, p = like_clause(["t.merchant", "t.spend_cat", "w.subject", "t.channel"], term)
+        cl, p = like_clause(["t.merchant", "t.spend_cat", "w.subject", "t.channel", "t.account"], term)
         where.append(cl)
         params += p
     kind = request.args.get("kind", "")
@@ -170,19 +240,28 @@ def bank_transactions():
 @login_required
 def bank_update(tid):
     body = request.get_json(silent=True) or {}
-    cat = body.get("category")
-    if cat not in ALL_CATEGORIES:
-        return jsonify(error="invalid category"), 400
     c = conn()
     row = c.one("SELECT merchant FROM transactions WHERE id=?", (tid,))
     if not row:
         return jsonify(error="not_found"), 404
-    c.execute("UPDATE transactions SET spend_cat=?, cat_src='user' WHERE id=?", (cat, tid))
-    changed = 1
-    if row["merchant"] and body.get("apply_to_merchant", True):  # teach: same shop, same category
-        cur = c.execute("UPDATE transactions SET spend_cat=?, cat_src='user' WHERE LOWER(merchant)=LOWER(?) AND cat_src<>'user'",
-                        (cat, row["merchant"]))
-        changed += max(0, cur.rowcount or 0)
+    changed = 0
+    if "excluded" in body:  # "not a real transaction" (or a transfer between your own accounts)
+        c.execute("UPDATE transactions SET excluded=? WHERE id=?", (1 if body["excluded"] else 0, tid))
+        changed = 1
+    if "merchant" in body:
+        name = re.sub(r"\s+", " ", str(body["merchant"])).strip()[:60]
+        c.execute("UPDATE transactions SET merchant=? WHERE id=?", (name, tid))
+        changed = 1
+    if "category" in body:
+        cat = body["category"]
+        if cat not in ALL_CATEGORIES:
+            return jsonify(error="invalid category"), 400
+        c.execute("UPDATE transactions SET spend_cat=?, cat_src='user' WHERE id=?", (cat, tid))
+        changed = 1
+        if row["merchant"] and body.get("apply_to_merchant", True):  # teach: same shop, same category
+            cur = c.execute("UPDATE transactions SET spend_cat=?, cat_src='user' WHERE LOWER(merchant)=LOWER(?) AND cat_src<>'user'",
+                            (cat, row["merchant"]))
+            changed += max(0, cur.rowcount or 0)
     c.commit()
     return jsonify(ok=True, changed=changed)
 
@@ -196,7 +275,7 @@ def _csv_safe(v):
 @login_required
 def bank_export():
     rows = conn().all("SELECT txn_date, kind, amount, currency, merchant, spend_cat, channel, account, balance, due_date"
-                      " FROM transactions ORDER BY txn_date DESC")
+                      " FROM transactions WHERE excluded=0 ORDER BY txn_date DESC")
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["date", "type", "amount", "currency", "merchant", "category", "channel", "account", "balance", "due_date"])

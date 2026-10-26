@@ -163,6 +163,7 @@ class Database:
                 name TEXT NOT NULL DEFAULT '',
                 relation TEXT NOT NULL DEFAULT 'friend'
             )""",
+            "CREATE TABLE IF NOT EXISTS budgets (category TEXT PRIMARY KEY, amount DOUBLE PRECISION NOT NULL)",
             "CREATE TABLE IF NOT EXISTS wseen (ws TEXT NOT NULL, gmail_id TEXT NOT NULL, PRIMARY KEY (ws, gmail_id))",
             "CREATE INDEX IF NOT EXISTS idx_wmails_ws ON wmails (ws, received_at)",
             "CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions (txn_date)",
@@ -186,6 +187,8 @@ class Database:
         ("emails", "fit_score", "INTEGER"),
         ("emails", "fit_reason", "TEXT NOT NULL DEFAULT ''"),
         ("accounts", "scope", "TEXT NOT NULL DEFAULT ''"),
+        ("transactions", "ref", "TEXT NOT NULL DEFAULT ''"),
+        ("transactions", "excluded", "INTEGER NOT NULL DEFAULT 0"),
     ]
 
     def _ensure_columns(self, conn):

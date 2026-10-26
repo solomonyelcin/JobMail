@@ -132,23 +132,63 @@ const isNarrow = () => matchMedia("(max-width: 900px)").matches;
 
 // ---------- themes & density (Gmail-style) ----------
 const THEMES = [
-  { id: "auto", name: "Auto", sw: "linear-gradient(135deg,#f6f8fc 50%,#1e1f20 50%)" },
-  { id: "light", name: "Light", sw: "#ffffff" },
-  { id: "dark", name: "Dark", sw: "#1e1f20" },
-  { id: "ocean", name: "Ocean", sw: "linear-gradient(135deg,#d6efff,#9fd5f1)" },
-  { id: "forest", name: "Forest", sw: "linear-gradient(135deg,#e3f3e8,#a9dbb9)" },
-  { id: "sunset", name: "Sunset", sw: "linear-gradient(135deg,#ffeedf,#f7bfd0)" },
-  { id: "lavender", name: "Lavender", sw: "linear-gradient(135deg,#f1ebff,#c9b9f3)" },
-  { id: "midnight", name: "Midnight", sw: "linear-gradient(135deg,#0a0f1f,#2a3f7a)" },
+  { id: "auto", name: "Auto", sw: "linear-gradient(135deg,#f6f8fc 50%,#1e1f20 50%)", g: "Standard" },
+  { id: "light", name: "Light", sw: "#ffffff", g: "Standard" },
+  { id: "dark", name: "Dark", sw: "#1e1f20", g: "Standard" },
+  { id: "ocean", name: "Ocean", sw: "linear-gradient(135deg,#d6efff,#9fd5f1)", g: "Standard" },
+  { id: "forest", name: "Forest", sw: "linear-gradient(135deg,#e3f3e8,#a9dbb9)", g: "Standard" },
+  { id: "sunset", name: "Sunset", sw: "linear-gradient(135deg,#ffeedf,#f7bfd0)", g: "Standard" },
+  { id: "lavender", name: "Lavender", sw: "linear-gradient(135deg,#f1ebff,#c9b9f3)", g: "Standard" },
+  { id: "midnight", name: "Midnight", sw: "linear-gradient(135deg,#0a0f1f,#2a3f7a)", g: "Standard" },
+  { id: "aurora", name: "Aurora", sw: "radial-gradient(circle at 20% 20%,#38ef7d,transparent 55%),radial-gradient(circle at 80% 30%,#8e2de2,transparent 55%),#050a1a", g: "Blurred scenes" },
+  { id: "mountains", name: "Dusk", sw: "linear-gradient(180deg,#1b1646,#6b2d7a 55%,#f08a5d)", g: "Blurred scenes" },
+  { id: "waves", name: "Beach", sw: "linear-gradient(180deg,#ffd9a8,#ffb3a7 45%,#2b7fa8)", g: "Blurred scenes" },
+  { id: "city", name: "City night", sw: "linear-gradient(180deg,#0b1026,#1b2250 60%,#432a63)", g: "Blurred scenes" },
+  { id: "bokeh", name: "Bokeh", sw: "radial-gradient(circle at 25% 30%,#ffb5c8,transparent 45%),radial-gradient(circle at 75% 65%,#a8e6cf,transparent 45%),#f7f1ff", g: "Blurred scenes" },
+  { id: "hc-light", name: "Black on white", sw: "linear-gradient(135deg,#fff 50%,#000 50%)", g: "High contrast" },
+  { id: "hc-dark", name: "White on black", sw: "linear-gradient(135deg,#000 50%,#fff 50%)", g: "High contrast" },
+  { id: "hc-yellow", name: "Yellow on black", sw: "linear-gradient(135deg,#000 50%,#ffff00 50%)", g: "High contrast" },
 ];
+const GLASS_THEMES = ["aurora", "mountains", "waves", "city", "bokeh", "photo-dark", "photo-light"];
+const DARK_THEMES = ["dark", "midnight", "aurora", "mountains", "city", "hc-dark", "hc-yellow", "photo-dark"];
 const DENSITIES = [["default", "Default", "Roomy rows"], ["comfortable", "Comfortable", "A bit tighter"], ["compact", "Compact", "Fit more on screen"]];
-const THEME_COLORS = { light: "#f6f8fc", dark: "#131314", ocean: "#d6efff", forest: "#e3f3e8", sunset: "#ffeedf", lavender: "#f1ebff", midnight: "#0a0f1f" };
+const THEME_COLORS = { light: "#f6f8fc", dark: "#131314", ocean: "#d6efff", forest: "#e3f3e8", sunset: "#ffeedf", lavender: "#f1ebff", midnight: "#0a0f1f", aurora: "#050a1a", mountains: "#1b1646", waves: "#ffd9a8", city: "#0b1026", bokeh: "#f7f1ff", "hc-light": "#ffffff", "hc-dark": "#000000", "hc-yellow": "#000000", "photo-dark": "#111111", "photo-light": "#f0f0f0" };
+const KNOWN_THEMES = () => THEMES.map((t) => t.id).concat(["photo-dark", "photo-light"]);
 function applyTheme(id) {
   const root = document.documentElement;
-  if (!id || id === "auto" || !THEMES.some((t) => t.id === id)) { delete root.dataset.theme; id = "auto"; } else root.dataset.theme = id;
-  const dark = id === "dark" || id === "midnight" || (id === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  if (!id || id === "auto" || !KNOWN_THEMES().includes(id)) { delete root.dataset.theme; id = "auto"; } else root.dataset.theme = id;
+  if (GLASS_THEMES.includes(id)) root.dataset.glass = "1"; else delete root.dataset.glass;
+  const dark = DARK_THEMES.includes(id) || (id === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.querySelector('meta[name="theme-color"]').setAttribute("content", THEME_COLORS[id] || (dark ? "#131314" : "#f6f8fc"));
-  store("jm-theme", id); buildThemePopover();
+  store("jm-theme", id); applyBackground(); buildThemePopover();
+}
+// custom photo background + blur / dim for the glass themes
+function applyBackground() {
+  const root = document.documentElement, photo = store("jm-bg");
+  const blur = store("jm-blur"), dim = store("jm-dim");
+  root.style.setProperty("--bg-blur", (blur === null || blur === "" ? 6 : Number(blur)) + "px");
+  root.style.setProperty("--bg-dim", (dim === null || dim === "" ? 25 : Number(dim)) / 100);
+  if (photo) root.style.setProperty("--bg-photo", `url("${photo}")`); else root.style.removeProperty("--bg-photo");
+}
+function readPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that file."));
+    reader.onload = () => {
+      const img = new Image();  // a data: URL, which the page's content security policy allows
+      img.onload = () => {
+        const max = 1920, k = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        let q = 0.8, out = c.toDataURL("image/jpeg", q);
+        while (out.length > 1400000 && q > 0.35) { q -= 0.15; out = c.toDataURL("image/jpeg", q); }
+        resolve(out);
+      };
+      img.onerror = () => reject(new Error("That file is not an image."));
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 function applyDensity(d) {
   const root = document.documentElement;
@@ -158,11 +198,43 @@ function applyDensity(d) {
 function buildThemePopover() {
   const cur = store("jm-theme") || "auto", dens = store("jm-density") || "default";
   const sw = $("swatches"); sw.replaceChildren();
-  THEMES.forEach((t) => {
-    const b = el("button", "swatch" + (cur === t.id ? " active" : "")); b.title = t.name;
-    const i = el("i"); i.style.setProperty("--sw", t.sw); b.append(i, t.name);
-    b.addEventListener("click", () => applyTheme(t.id)); sw.append(b);
+  [...new Set(THEMES.map((t) => t.g))].forEach((g) => {
+    sw.append(el("h4", "", g)); const grid = el("div", "swatches");
+    THEMES.filter((t) => t.g === g).forEach((t) => {
+      const b = el("button", "swatch" + (cur === t.id ? " active" : "")); b.title = t.name; b.type = "button";
+      const i = el("i"); i.style.setProperty("--sw", t.sw); b.append(i, t.name);
+      b.addEventListener("click", () => applyTheme(t.id)); grid.append(b);
+    });
+    sw.append(grid);
   });
+  const pr = $("photoRow"); pr.replaceChildren();
+  const has = !!store("jm-bg"), file = el("input"); file.type = "file"; file.accept = "image/*"; file.className = "hidden";
+  file.addEventListener("change", async () => {
+    const f = file.files[0]; if (!f) return;
+    try {
+      const data = await readPhoto(f); store("jm-bg", data);
+      if (store("jm-bg") !== data) { store("jm-bg", ""); throw new Error("That photo is too big to keep in this browser. Try a smaller one."); }
+      applyTheme(DARK_THEMES.includes(cur) || cur === "auto" ? "photo-dark" : "photo-light");
+    } catch (err) { toast(err.message || "Could not use that photo", "error"); }
+  });
+  const up = el("button", "btn small", has ? "Change photo" : "Upload a photo"); up.type = "button"; up.addEventListener("click", () => file.click());
+  pr.append(file, up);
+  if (has) {
+    ["photo-dark", "photo-light"].forEach((id, n) => {
+      const b = el("button", "btn small" + (cur === id ? " tonal" : ""), n ? "Light glass" : "Dark glass"); b.type = "button"; b.addEventListener("click", () => applyTheme(id)); pr.append(b);
+    });
+    const rm = el("button", "btn small danger", "Remove"); rm.type = "button";
+    rm.addEventListener("click", () => { store("jm-bg", ""); applyTheme(cur.startsWith("photo-") ? "auto" : cur); }); pr.append(rm);
+  }
+  if (GLASS_THEMES.includes(cur)) {
+    const slider = (label, key, def, max) => {
+      const w = el("label", "slider"); w.append(el("span", "", label));
+      const r = el("input"); r.type = "range"; r.min = "0"; r.max = String(max); const v = store(key); r.value = v === null || v === "" ? def : v;
+      r.addEventListener("input", () => { store(key, r.value); applyBackground(); }); w.append(r); pr.append(w);
+    };
+    slider("Background blur", "jm-blur", 6, 30); slider("Darken background", "jm-dim", 25, 70);
+  }
+  pr.append(el("p", "muted small photo-note", has ? "Your photo stays in this browser only." : "Pick any picture from your device. It stays in this browser only."));
   const dr = $("densityRow"); dr.replaceChildren();
   DENSITIES.forEach(([id, name, hint]) => {
     const b = el("button", dens === id ? "active" : ""); b.append(el("span", "", name), el("span", "muted small", " · " + hint));

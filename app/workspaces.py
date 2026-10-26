@@ -1,7 +1,7 @@
 """Banking and Personal workspaces: Gmail queries, syncing, and people (contacts) handling."""
 import re
 
-from .bank import parse_bank_email
+from .bank import BANK_PARSER_VERSION, parse_bank_email
 from .sync import _addr
 
 BANK_SENDERS = (
@@ -101,10 +101,10 @@ def run_ws_sync(db, gmail, ws, days, batch):
             if txn:
                 conn.execute(
                     "INSERT INTO transactions (mail_id, txn_date, kind, amount, currency, merchant, spend_cat, channel,"
-                    " account, balance, min_due, due_date, src) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " account, balance, min_due, due_date, src, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (row["id"], m["received_at"], txn["kind"], txn["amount"], txn["currency"], txn["merchant"],
                      txn["spend_cat"], txn["channel"], txn["account"], txn["balance"], txn["min_due"],
-                     txn["due_date"], txn["src"]))
+                     txn["due_date"], txn["src"], txn["ref"]))
             stored += 1
         if remaining == 0 and hasattr(gmail, "list_message_ids"):
             refresh_ws_unread(conn, gmail, ws, query_for(conn, ws, days))
@@ -137,3 +137,67 @@ def apply_people_change(conn):
         else:
             conn.execute("DELETE FROM wmails WHERE id=?", (r["id"],))
     conn.execute("DELETE FROM wseen WHERE ws='personal'")
+
+
+def reparse_bank(db):
+    """Re-read every stored bank email with the current parser. Your edits (category, excluded) are kept.
+    Returns {"checked", "updated", "removed"}."""
+    from .sync import set_meta
+    conn = db.connect()
+    try:
+        rows = conn.all("SELECT id, subject, snippet, body_text, sender_email, received_at FROM wmails WHERE ws='bank'")
+        updated = removed = 0
+        for r in rows:
+            t = parse_bank_email(r["subject"], r["snippet"], r["body_text"], r["sender_email"], r["received_at"])
+            old = conn.one("SELECT id, cat_src, spend_cat, merchant FROM transactions WHERE mail_id=?", (r["id"],))
+            if not t:
+                conn.execute("DELETE FROM transactions WHERE mail_id=?", (r["id"],))
+                conn.execute("DELETE FROM wmails WHERE id=?", (r["id"],))
+                removed += 1
+                continue
+            conn.execute("UPDATE wmails SET category=? WHERE id=?", (t["category"], r["id"]))
+            keep = old and old["cat_src"] in ("user", "ai") and t["kind"] in ("debit", "credit")
+            cat = old["spend_cat"] if keep else t["spend_cat"]
+            merchant = old["merchant"] if keep and old["merchant"] else t["merchant"]
+            src_flag = old["cat_src"] if keep else "rule"
+            if old:
+                conn.execute(
+                    "UPDATE transactions SET kind=?, amount=?, currency=?, merchant=?, spend_cat=?, cat_src=?, channel=?,"
+                    " account=?, balance=?, min_due=?, due_date=?, src=?, ref=? WHERE id=?",
+                    (t["kind"], t["amount"], t["currency"], merchant, cat, src_flag, t["channel"], t["account"],
+                     t["balance"], t["min_due"], t["due_date"], t["src"], t["ref"], old["id"]))
+            else:
+                conn.execute(
+                    "INSERT INTO transactions (mail_id, txn_date, kind, amount, currency, merchant, spend_cat, channel,"
+                    " account, balance, min_due, due_date, src, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (r["id"], r["received_at"], t["kind"], t["amount"], t["currency"], merchant, cat, t["channel"],
+                     t["account"], t["balance"], t["min_due"], t["due_date"], t["src"], t["ref"]))
+            updated += 1
+        set_meta(conn, "bank_parser_version", BANK_PARSER_VERSION)
+        conn.commit()
+        return {"checked": len(rows), "updated": updated, "removed": removed}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def ensure_bank_parser_current(db):
+    """When the parsing rules change, re-read stored bank emails once so old data benefits from the fixes."""
+    from .sync import get_meta
+    conn = db.connect()
+    try:
+        if get_meta(conn, "bank_parser_version") == BANK_PARSER_VERSION:
+            return
+        has = conn.one("SELECT COUNT(*) AS n FROM wmails WHERE ws='bank'")["n"]
+    finally:
+        conn.close()
+    if has:
+        reparse_bank(db)
+    else:
+        c = db.connect()
+        from .sync import set_meta
+        set_meta(c, "bank_parser_version", BANK_PARSER_VERSION)
+        c.commit()
+        c.close()
