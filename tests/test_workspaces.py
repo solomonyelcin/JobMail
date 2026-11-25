@@ -1,5 +1,10 @@
+from datetime import date, timedelta
+
 import conftest
 from conftest import msg
+
+# due date is relative to today so the "upcoming payments" check does not go stale
+DUE = date.today() + timedelta(days=10)
 
 
 class WsGmail(conftest.FakeGmail):
@@ -22,7 +27,7 @@ BANK = [
     msg("b2", "Salary credited", "ICICI <alerts@icicibank.com>", "INR 85,000.00 credited to your account XX1234 salary",
         "INR 85,000.00 credited to your account XX1234 salary", when="2026-10-01T10:00:00Z"),
     msg("b3", "Your credit card statement", "HDFC Cards <cards@hdfcbank.net>", "Total amount due Rs. 12,430.50",
-        "Total amount due Rs. 12,430.50. Minimum amount due Rs. 620. Payment due date 05-11-2026", when="2026-10-20T10:00:00Z"),
+        "Total amount due Rs. 12,430.50. Minimum amount due Rs. 620. Payment due date " + DUE.strftime("%d-%m-%Y"), when="2026-10-20T10:00:00Z"),
     msg("b4", "Your OTP", "SBI <a@sbi.co.in>", "Your OTP is 123456", "Your OTP is 123456"),
     msg("b5", "Transaction alert", "UPI <noreply@phonepe.com>", "Rs. 450.00 debited from a/c XX1234 to swiggy",
         "Rs. 450.00 debited from a/c XX1234 to VPA swiggy@icici", when="2026-10-12T11:00:00Z"),
@@ -46,7 +51,7 @@ def test_bank_sync_and_summary(app, auth_client):
     assert s["totals"]["credit"] == 85000.0
     assert s["totals"]["debit"] == 450.0  # the duplicate alert from PhonePe is not double counted
     assert s["by_category"][0]["name"] == "Food & Dining"
-    assert s["upcoming"] and s["upcoming"][0]["due_date"] == "2026-11-05" and s["upcoming"][0]["min_due"] == 620.0
+    assert s["upcoming"] and s["upcoming"][0]["due_date"] == DUE.isoformat() and s["upcoming"][0]["min_due"] == 620.0
     assert s["accounts"][0]["balance"] == 12345.6
 
 
