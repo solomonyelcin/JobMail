@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const AUTO_SYNC_MS = 5 * 60 * 1000;
 
 const S = {
-  statuses: [], categories: [], view: "dashboard", apps: [], statusFilter: "", sort: "recent",
+  statuses: [], categories: [], view: "actions", apps: [], statusFilter: "", sort: "recent",
   emailPage: 1, emailCat: "", unreadOnly: false, emailReq: 0, selectedId: null, editing: null, drawerId: null,
   syncing: false, analyzing: false, lastSync: null, aiEnabled: false, canDraft: false, profile: null, stats: null,
   aiWarned: {}, ws: "job",
@@ -286,14 +286,14 @@ function showLogin(msg) {
 }
 
 // ---------- views ----------
-const VIEW_TYPE = { dashboard: "dashboard", inbox: "emails", unread: "emails", matches: "matches", board: "apps", list: "apps", profile: "profile" };
+const VIEW_TYPE = { actions: "actions", dashboard: "dashboard", inbox: "emails", unread: "emails", matches: "matches", board: "apps", list: "apps", profile: "profile" };
 const viewType = (k) => (k.startsWith("label:") ? "emails" : VIEW_TYPE[k] || "dashboard");
 function setView(key, load = true) {
   if (/^(bank|personal):/.test(key)) return wsSetView(key, load);
   if (S.ws !== "job") wsEnter("job");
   S.view = key; const type = viewType(key);
   S.unreadOnly = key === "unread"; S.emailCat = key.startsWith("label:") ? key.slice(6) : "";
-  ["dashboard", "emails", "matches", "apps", "profile"].forEach((t) => $(t + "View").classList.toggle("hidden", t !== type));
+  ["actions", "dashboard", "emails", "matches", "apps", "profile"].forEach((t) => $(t + "View").classList.toggle("hidden", t !== type));
   $("bankView").classList.add("hidden"); $("personalView").classList.add("hidden");
   $("boardView").classList.toggle("hidden", key !== "board"); $("listView").classList.toggle("hidden", key !== "list");
   $("segBoard").classList.toggle("active", key === "board"); $("segList").classList.toggle("active", key === "list");
@@ -303,7 +303,7 @@ function setView(key, load = true) {
   $("q").placeholder = type === "apps" ? "Search applications…" : "Search job emails…";
   closeEmailPane(); placePane(); $("content").scrollTop = 0;
   if (!load) return;
-  ({ dashboard: loadDashboard, emails: () => loadEmails(true), matches: loadMatches, apps: loadApps, profile: loadProfile })[type]();
+  ({ actions: loadActions, dashboard: loadDashboard, emails: () => loadEmails(true), matches: loadMatches, apps: loadApps, profile: loadProfile })[type]();
 }
 function refreshAll() {
   if (S.ws !== "job") return wsRefresh();
@@ -311,6 +311,7 @@ function refreshAll() {
   if (t === "apps") jobs.push(loadApps());
   if (t === "emails" && S.emailPage === 1) jobs.push(loadEmails(true));
   if (t === "matches") jobs.push(loadMatches());
+  if (t === "actions") jobs.push(loadActions());
   if (t === "dashboard") jobs.push(loadDashboardLists());
   return Promise.all(jobs);
 }
@@ -410,7 +411,7 @@ function buildLabelNav() {
 function setCount(id, n) { const c = $(id); if (c) c.textContent = n ? String(n) : ""; }
 async function loadStats() {
   const s = await api("GET", "/api/stats"); S.stats = s;
-  setCount("cInbox", s.total_emails); setCount("cUnread", s.unread); setCount("cMatches", s.strong_matches); setCount("cBoard", s.total_applications);
+  setCount("cInbox", s.total_emails); setCount("cUnread", s.unread); setCount("cMatches", s.strong_matches); setCount("cActions", s.needs_action); setCount("cBoard", s.total_applications);
   S.categories.forEach((c) => setCount("lc-" + c, s.emails[c] || 0));
   updateAiChip(s);
 
@@ -499,6 +500,7 @@ function emailRow(e, compact) {
   if (S.selectedId === e.id) row.classList.add("sel");
   const sender = el("span", "sender"); appendHighlighted(sender, senderName(e.sender), ts);
   const subj = el("span", "subj-cell"); subj.append(chip(e.category));
+  if (e.replied_at) subj.append(el("span", "replied-tag", "Replied"));
   const s = el("span", "s"); appendHighlighted(s, e.subject || "(no subject)", ts); subj.append(s);
   const sn = el("span", "snip"); sn.append(" – "); appendHighlighted(sn, e.ai_summary || e.snippet || "", ts); subj.append(sn);
   const fit = el("span", "fitcell"); if (e.fit_score !== null && e.fit_score !== undefined) fit.append(fitBadge(e.fit_score));
@@ -532,7 +534,7 @@ $("moreBtn").addEventListener("click", () => { S.emailPage += 1; loadEmails(fals
 
 // ---------- reading pane ----------
 function placePane() {
-  const docked = (viewType(S.view) === "emails" || S.ws === "personal") && matchMedia("(min-width: 1100px)").matches;
+  const docked = (["emails", "actions"].includes(viewType(S.view)) || S.ws === "personal") && matchMedia("(min-width: 1100px)").matches;
   $("emailPane").classList.toggle("overlay", !docked); syncBackdrop();
 }
 window.addEventListener("resize", debounce(() => { placePane(); if (T.open) placeTour(TOUR[T.i]); }, 120));
@@ -576,12 +578,12 @@ function renderEmailPane(e) {
     if (e.fit_reason) txt.append(el("div", "muted small", "Why this score: " + e.fit_reason));
     box.append(ic("sparkle"), txt); body.append(box);
   }
-  body.append(el("div", "mail-body", e.body_text || e.snippet || "(no text)"));
-  const actions = el("div", "row wrap");
-  if (S.aiEnabled) { const r = el("button", "btn primary"); r.append(icon("sparkle"), "Reply with AI"); r.addEventListener("click", () => openCompose(e)); actions.append(r); }
-  else actions.append(el("span", "muted small", "Turn on AI (Profile) to draft replies with your resume."));
-  body.append(actions);
+  const top = el("div", "mail-extras"), rest = el("div", "mail-extras");
+  body.append(top);
+  const mb = el("div", "mail-body"); linkify(mb, e.body_text || e.snippet || "(no text)"); body.append(mb);
+  body.append(rest);
   pane.append(bar, body);
+  renderMailExtras(e, top, rest);
 }
 
 // ---------- matches ----------
@@ -746,9 +748,11 @@ $("dlgCancel").addEventListener("click", () => $("dlg").close());
 $("addBtn").addEventListener("click", () => { openDialog(null); closeSidebarIfNarrow(); });
 
 // ---------- profile & resume ----------
+const PROFILE_FIELDS = { pPhone: "phone", pContact: "contact_email", pLinkedin: "linkedin", pExp: "experience", pLoc: "location", pNotice: "notice_period", pCurCtc: "current_ctc", pExpCtc: "expected_ctc" };
 async function loadProfile() {
   const p = await api("GET", "/api/profile"); S.profile = p;
   $("pName").value = p.full_name; $("pText").value = p.profile_text;
+  Object.entries(PROFILE_FIELDS).forEach(([id, key]) => { $(id).value = p[key] || ""; });
   const info = $("resumeInfo");
   if (p.resume) {
     info.textContent = `${p.resume.filename} · ${Math.max(1, Math.round(p.resume.size / 1024))} KB · updated ${ago(p.resume.updated_at)}` +
@@ -764,7 +768,9 @@ async function loadProfile() {
 }
 $("pSave").addEventListener("click", async () => {
   try {
-    await api("PUT", "/api/profile", { full_name: $("pName").value, profile_text: $("pText").value });
+    const body = { full_name: $("pName").value, profile_text: $("pText").value };
+    Object.entries(PROFILE_FIELDS).forEach(([id, key]) => { body[key] = $(id).value; });
+    await api("PUT", "/api/profile", body);
     $("pMsg").textContent = "Saved."; toast("Profile saved", "ok");
     if (S.aiEnabled) toast("Use “Re-score all emails” to apply it to existing emails");
   } catch (e) { toast("Could not save profile", "error"); }
@@ -798,47 +804,77 @@ async function testAI() {
 }
 $("aiTestBtn").addEventListener("click", testAI);
 
-// ---------- reply with AI ----------
-const C = { emailId: null };
+// ---------- replies: templates, apply by email and AI ----------
+const C = { emailId: null, newThread: false, email: null, onDone: null };
 function composeReset() {
   ["composeForm", "composeDone", "cRewrite", "cCreate", "composeError"].forEach((id) => $(id).classList.add("hidden"));
   $("composeStatus").classList.remove("hidden"); $("composeStatus").textContent = "Writing a draft…"; $("composeWarn").classList.add("hidden");
 }
-async function openCompose(e) {
-  if (!S.aiEnabled) { toast("AI is off. See the Profile page.", "error"); return; }
-  C.emailId = e.id; composeReset(); $("cInstr").value = ""; $("composeDlg").showModal();
-  await generateDraft("");
+// Open the reply dialog. `how` is a template id, or "ai" (or nothing) for an AI-written reply.
+async function openCompose(e, how) {
+  C.emailId = e.id; C.email = e; C.newThread = false; C.templates = null; C.onDone = () => { if (S.view === "actions") loadActions(); }; composeReset(); $("cInstr").value = "";
+  const tid = how && how !== "ai" ? how : "";
+  if (!tid && !S.aiEnabled) { toast("AI is off. Pick a template instead, or see the Profile page.", "error"); return; }
+  $("composeDlg").showModal();
+  if (tid) await fillTemplate(tid); else await generateDraft("");
+}
+async function loadTemplateChoices(selected) {
+  const sel = $("cTemplate"); sel.replaceChildren();
+  sel.append(new Option(S.aiEnabled ? "Written by AI" : "Pick a template…", "ai"));
+  let list = C.templates;
+  if (!list) { try { list = (await api("GET", `/api/emails/${C.emailId}/details`)).templates; } catch (_) { list = []; } }
+  C.templates = list;
+  list.forEach((t) => sel.append(new Option((t.suggested ? "★ " : "") + t.label, t.id)));
+  sel.value = selected;
+}
+function showDraft(r, mode) {
+  $("cTo").value = r.to; $("cSubject").value = r.subject; $("cBody").value = r.body;
+  C.newThread = !!r.new_thread;
+  $("cAttach").checked = !!(r.attach !== undefined ? r.attach : r.has_resume); $("cAttach").disabled = !r.has_resume;
+  $("cAttachLabel").textContent = r.has_resume ? "Attach my resume" : "Attach my resume (upload one on the Profile page first)";
+  $("composeTitle").textContent = C.newThread ? "Apply by email" : "Reply";
+  const warns = [];
+  if (r.no_reply) warns.push("This sender looks like a no-reply address, so a reply may never be read.");
+  if (!r.to) warns.push("No address found. Enter one in the To field.");
+  if (r.missing && r.missing.length) warns.push("Fill in before sending: " + r.missing.join(", "));
+  if (C.newThread && !r.has_resume) warns.push("No resume uploaded, so nothing will be attached.");
+  $("composeWarn").textContent = warns.join(" "); $("composeWarn").classList.toggle("hidden", !warns.length);
+  $("composeStatus").classList.add("hidden");
+  $("composeForm").classList.remove("hidden"); $("cCreate").classList.remove("hidden");
+  $("cRewrite").classList.toggle("hidden", !S.aiEnabled || C.newThread);
+  $("cInstr").parentElement.classList.toggle("hidden", !S.aiEnabled || C.newThread);
+  return loadTemplateChoices(mode);
+}
+async function fillTemplate(tid) {
+  composeReset(); $("composeStatus").textContent = "Preparing the message…";
+  try { await showDraft(await api("POST", `/api/emails/${C.emailId}/template`, { template_id: tid }), tid); }
+  catch (err) { $("composeStatus").textContent = "Could not prepare the message."; $("composeError").textContent = "Please try again in a moment."; $("composeError").classList.remove("hidden"); }
 }
 async function generateDraft(instructions) {
   composeReset();
-  try {
-    const r = await api("POST", `/api/emails/${C.emailId}/compose`, { instructions });
-    $("cTo").value = r.to; $("cSubject").value = r.subject; $("cBody").value = r.body;
-    $("cAttach").checked = r.has_resume; $("cAttach").disabled = !r.has_resume;
-    $("cAttachLabel").textContent = r.has_resume ? "Attach my resume" : "Attach my resume (upload one on the Profile page first)";
-    const warns = [];
-    if (r.no_reply) warns.push("This sender looks like a no-reply address, so a reply may never be read.");
-    if (!r.to) warns.push("No reply address found. Enter one in the To field.");
-    $("composeWarn").textContent = warns.join(" "); $("composeWarn").classList.toggle("hidden", !warns.length);
-    $("composeStatus").classList.add("hidden");
-    ["composeForm", "cRewrite", "cCreate"].forEach((id) => $(id).classList.remove("hidden"));
-  } catch (err) {
+  try { await showDraft(await api("POST", `/api/emails/${C.emailId}/compose`, { instructions }), "ai"); }
+  catch (err) {
     $("composeStatus").textContent = "Could not write a draft.";
     $("composeError").textContent = (err.data && err.data.help) || "Please try again in a moment.";
     $("composeError").classList.remove("hidden");
   }
 }
+$("cTemplate").addEventListener("change", () => { const v = $("cTemplate").value; if (v === "ai") generateDraft($("cInstr").value); else fillTemplate(v); });
 $("cRewrite").addEventListener("click", () => generateDraft($("cInstr").value));
 $("cClose").addEventListener("click", () => $("composeDlg").close());
 $("cCreate").addEventListener("click", async () => {
+  const left = ($("cBody").value + " " + $("cSubject").value).match(/\[[^\]]{2,60}\]/g);
+  if (left && !confirm("This still has placeholders to fill in: " + [...new Set(left)].slice(0, 5).join(", ") + ". Create the draft anyway?")) return;
   $("cCreate").disabled = true;
   try {
-    const r = await api("POST", `/api/emails/${C.emailId}/draft`, { to: $("cTo").value, subject: $("cSubject").value, body: $("cBody").value, attach_resume: $("cAttach").checked });
+    const r = await api("POST", `/api/emails/${C.emailId}/draft`, { to: $("cTo").value, subject: $("cSubject").value, body: $("cBody").value, attach_resume: $("cAttach").checked, new_thread: C.newThread });
     ["composeForm", "cRewrite", "cCreate"].forEach((id) => $(id).classList.add("hidden"));
     $("composeDone").classList.remove("hidden");
+    $("composeDoneText").textContent = C.newThread ? "Application draft created in your Gmail. Review it there and press send." : "Draft created in your Gmail. Review it there and press send.";
     const ok = typeof r.url === "string" && r.url.startsWith("https://mail.google.com/");
     $("composeLink").href = ok ? r.url : "https://mail.google.com/mail/u/0/#drafts";
     toast(r.attached ? "Draft created with your resume attached" : "Draft created", "ok");
+    loadStats(); if (C.onDone) C.onDone();
   } catch (err) {
     $("composeWarn").textContent = err.data && err.data.error === "reauth_scope"
       ? "SmartMail needs permission to create drafts. Open the Profile page and use “Re-connect Google”." : "Could not create the draft: " + err.message;
@@ -850,7 +886,7 @@ $("cCreate").addEventListener("click", async () => {
 const TOUR = [
   { t: "Welcome to SmartMail", x: "A one-minute tour. SmartMail sorts your Gmail into three workspaces: Job, Banking and Personal. We start in Job, where emails become an inbox, a pipeline board and AI-scored job matches." },
   { t: "Switch workspace", x: "Use this menu to move between Job, Banking (spending, EMIs and bills with charts) and Personal (family, friends and starred mail). Each has its own sidebar.", sel: "#wsBtn", side: true },
-  { t: "Your sidebar", x: "Dashboard shows the big picture. Inbox has every job email from the last 3 months and Unread mirrors Gmail's unread state.", sel: "#sidebarNav", side: true },
+  { t: "Your sidebar", x: "Needs action lists the mails waiting for your reply. Inbox has every job email from the last 3 months, Unread mirrors Gmail, and Overview has the numbers.", sel: "#sidebarNav", side: true },
   { t: "Labels", x: "Emails are sorted automatically into Applied, Assessment, Interview, Offer, Rejected, Opening and Recruiter. Click a label to filter.", sel: "#labelNav", side: true },
   { t: "Search", x: "Search subjects, senders and message text. Press / anywhere to jump here, and j / k to move through emails.", sel: "#searchBox" },
   { t: "Automatic sync", x: "SmartMail checks Gmail when you open it and every 5 minutes. Press refresh to sync right now.", sel: "#syncBtn" },
@@ -863,7 +899,7 @@ const TOUR = [
   { t: "Replay anytime", x: "Press Tour whenever you want to see this again.", sel: "#tourBtn" },
 ];
 const T = { i: 0, open: false };
-function startTour() { if ($("appShell").classList.contains("hidden")) return; if (S.ws !== "job") setView("dashboard"); T.open = true; T.i = 0; $("tour").classList.remove("hidden"); showTour(); }
+function startTour() { if ($("appShell").classList.contains("hidden")) return; if (S.ws !== "job") setView("actions"); T.open = true; T.i = 0; $("tour").classList.remove("hidden"); showTour(); }
 function endTour() {
   T.open = false; $("tour").classList.add("hidden"); store("jm-tour-done", "1");
   if (isNarrow()) $("sidebar").classList.remove("open"); syncBackdrop();

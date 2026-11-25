@@ -18,7 +18,7 @@ Object.assign(ICONS, {
 });
 
 const WS = {
-  job: { name: "Job", sub: "Applications & openings", icon: "briefcase", home: "dashboard", ph: "Search job emails…" },
+  job: { name: "Job", sub: "Applications & openings", icon: "briefcase", home: "actions", ph: "Search job emails…" },
   bank: { name: "Banking", sub: "Spending, EMIs & bills", icon: "bank", home: "bank:dashboard", ph: "Search transactions…" },
   personal: { name: "Personal", sub: "Family, friends & starred", icon: "heart", home: "personal:inbox", ph: "Search personal mail…" },
 };
@@ -84,7 +84,7 @@ function wsInit() {
   const saved = store("jm-ws");
   loadWsStats().catch(() => {});
   const ws = WS[saved] ? saved : "job";
-  if (ws === "job") { wsEnter("job"); setView("dashboard"); }
+  if (ws === "job") { wsEnter("job"); setView("actions"); }
   else {
     S.ws = "job"; wsEnter("job"); // wsEnter saves jobLast first
     S.jobLast = S.lastSync; setView(WS[ws].home);
@@ -97,7 +97,7 @@ function wsSetView(key, load = true) {
   const [ws, view] = key.split(":");
   if (S.ws !== ws) wsEnter(ws);
   S.view = key;
-  ["dashboard", "emails", "matches", "apps", "profile"].forEach((t) => $(t + "View").classList.add("hidden"));
+  ["actions", "dashboard", "emails", "matches", "apps", "profile"].forEach((t) => $(t + "View").classList.add("hidden"));
   $("bankView").classList.toggle("hidden", ws !== "bank"); $("personalView").classList.toggle("hidden", ws !== "personal");
   document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === key));
   closeEmailPane(); closeDrawer(); placePane(); $("content").scrollTop = 0;

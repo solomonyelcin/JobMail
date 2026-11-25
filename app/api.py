@@ -203,7 +203,7 @@ def list_emails():
     page = max(1, int(request.args.get("page", 1) or 1))
     rows = conn().all(
         "SELECT e.id, e.subject, e.sender, e.snippet, e.received_at, e.category, e.company, e.role,"
-        " e.is_unread, e.ai_summary, e.fit_score, e.fit_reason,"
+        " e.is_unread, e.ai_summary, e.fit_score, e.fit_reason, e.replied_at, e.done,"
         f" e.application_id, a.status AS application_status {base}"
         " ORDER BY e.received_at DESC LIMIT ? OFFSET ?",
         params + [PAGE, (page - 1) * PAGE],
@@ -395,7 +395,9 @@ def stats():
     matches = c.one("SELECT COUNT(*) AS n FROM emails WHERE category IN ('opening','recruiter')"
                     " AND fit_score >= 70")["n"]
     err_kind = get_meta(c, "ai_last_error") if ai.enabled(cfg) else ""
-    return jsonify(applications=apps, emails=cats, total_emails=sum(cats.values()),
+    needs_action = c.one("SELECT COUNT(*) AS n FROM emails WHERE done=0 AND replied_at IS NULL"
+                         " AND category IN ('interview','assessment','offer','recruiter')")["n"]
+    return jsonify(needs_action=needs_action, applications=apps, emails=cats, total_emails=sum(cats.values()),
                    total_applications=sum(apps.values()), weekly=weekly, stale=stale,
                    unread=unread, pending_ai=pending_ai, strong_matches=matches,
                    ai_error={"kind": err_kind, "help": ai.help_text(err_kind, cfg)} if err_kind else None)

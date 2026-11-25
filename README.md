@@ -20,6 +20,12 @@ Switch workspace from the menu at the top of the sidebar:
 
 ## Features
 
+- **Needs action** (the landing view): interviews, assessments, offers and recruiter messages you have not replied to, each with the reason. Mark one as done, or open it to reply.
+- **Reading a job mail**: the pane shows the key details pulled from the text (addresses to apply to, deadlines and interview dates with days left, location, work mode, experience asked, pay, links), links in the body are clickable, and other messages in the same Gmail thread are listed.
+- **How you fit**: every job mail is compared with your resume. A free keyword comparison shows which skills are on your resume, which are asked for but missing, and how the years of experience compare. "Analyse with AI" adds strengths, gaps, what to emphasise, questions to ask and a next step (cached per email).
+- **Ready-made replies (no AI needed)**: 15 templates (interested, share notice period/CTC/location, confirm or reschedule an interview, thank you, follow up, accept/negotiate/decline an offer and more), filled from your profile. Anything unknown stays as a [placeholder], and SmartMail warns before you create a draft that still has one.
+- **Apply by email**: when a job post says "send your resume to ...", one click drafts a new application mail to that address with your resume attached. Replies stay in the original Gmail thread.
+- **Reply details** on the Profile page (phone, location, notice period, CTC, links) feed the templates.
 - **Gmail-style interface**: left sidebar (Inbox, Unread, Best matches, Board, Applications, colour labels), pill search bar, reading pane, 6 colour themes, 5 blurred scene themes (Aurora, Dusk, Beach, City night, Bokeh), your own photo background with blur and darkness sliders, 3 high-contrast themes (black on white, white on black, yellow on black), plus light/dark/auto and 3 densities (palette button), and a **Tour** button next to Sign out that walks through the app (also runs on first visit).
 - **AI diagnostics**: if AI fails, a banner and the sidebar chip say why (no credit, bad key, model name). Profile > **Test AI connection** checks the key and models.
 - **Gmail sign-in** with Google OAuth. Only the one account in `ALLOWED_EMAIL` can log in.
@@ -32,7 +38,7 @@ Switch workspace from the menu at the top of the sidebar:
 - **Application tracking**: company and role are extracted automatically; status follows the latest email. Manual status edits are never overwritten by later syncs.
 - **Kanban board** with drag and drop, plus a list view, a detail drawer with notes and an email timeline, and a "needs follow-up" nudge for applications quiet for 14+ days.
 - **Search and filters**: highlighted free-text search, category chips, application status, date range, sorting.
-- **Insights**: pipeline funnel, response rate, weekly email activity.
+- **Overview**: pipeline funnel, response rate, weekly email activity (moved below the working views).
 - **Tools**: CSV export, "Not job-related" to remove a wrongly captured email, dark mode, keyboard shortcut `/` to search, works on phones.
 - **Security**: refresh token encrypted at rest (Fernet), signed session cookies, HTTPS-only cookies in production, strict CSP, CSRF header on all writes, no CORS (frontend and API share one origin).
 
@@ -78,7 +84,7 @@ Follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 SmartMail requests two Gmail permissions: `gmail.readonly` (read mail) and `gmail.compose` (create drafts). The code only ever reads mail and creates a draft when you press "Create Gmail draft"; it does not send, delete or modify messages. Note that Google's `compose` permission technically also allows sending, so keep your Google credentials and the host's environment variables private.
 
-When AI is enabled, the text of job-related emails and your profile/resume text are sent to Anthropic's API for analysis and drafting. Only emails matching job-related rules are saved (subject, sender, snippet, first 4,000 characters of text). Message ids of non-job emails are remembered so they are not re-fetched.
+When AI is enabled, the text of job-related emails and your profile/resume text are sent to your AI provider for analysis, resume matching and drafting. The keyword resume comparison, key-detail extraction and reply templates run on the server and send nothing anywhere. Only emails matching job-related rules are saved (subject, sender, snippet, first 12,000 characters of text). Message ids of non-job emails are remembered so they are not re-fetched.
 
 ## Known limitations
 

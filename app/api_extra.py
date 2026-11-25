@@ -11,14 +11,22 @@ from .api import bp, conn, cfg, login_required
 from .sync import now_iso, set_meta
 
 
+# short facts used to prefill replies (placeholders are left in the message when one is empty)
+DETAIL_FIELDS = ("phone", "contact_email", "linkedin", "experience", "location", "notice_period",
+                 "current_ctc", "expected_ctc")
+
+
 def _profile_row(c):
     row = c.one("SELECT full_name, profile_text, resume_filename, resume_mime, resume_updated_at,"
-                " LENGTH(resume_data) AS resume_size, LENGTH(resume_text) AS resume_text_len FROM profile WHERE id=1")
+                " LENGTH(resume_data) AS resume_size, LENGTH(resume_text) AS resume_text_len,"
+                " " + ", ".join(DETAIL_FIELDS) + " FROM profile WHERE id=1")
     if not row:
-        return {"full_name": "", "profile_text": "", "resume": None, "ai_enabled": ai.enabled(cfg)}
+        return {"full_name": "", "profile_text": "", "resume": None, "ai_enabled": ai.enabled(cfg),
+                **{k: "" for k in DETAIL_FIELDS}}
     has = bool(row["resume_filename"] and row["resume_size"])
     return {
         "full_name": row["full_name"], "profile_text": row["profile_text"], "ai_enabled": ai.enabled(cfg),
+        **{k: row[k] for k in DETAIL_FIELDS},
         "resume": {"filename": row["resume_filename"], "size": row["resume_size"],
                    "updated_at": row["resume_updated_at"], "text_extracted": bool(row["resume_text_len"])} if has else None,
     }
@@ -37,10 +45,14 @@ def put_profile():
     d = request.get_json(silent=True) or {}
     name = str(d.get("full_name", "")).strip()[:100]
     text = str(d.get("profile_text", "")).strip()[:8000]
+    details = [str(d.get(k, "")).strip()[:120] for k in DETAIL_FIELDS]
     c = conn()
-    c.execute("INSERT INTO profile (id, full_name, profile_text) VALUES (1, ?, ?)"
-              " ON CONFLICT (id) DO UPDATE SET full_name=excluded.full_name, profile_text=excluded.profile_text",
-              (name, text))
+    cols = ", ".join(DETAIL_FIELDS)
+    marks = ", ".join("?" for _ in DETAIL_FIELDS)
+    upd = ", ".join(f"{k}=excluded.{k}" for k in DETAIL_FIELDS)
+    c.execute(f"INSERT INTO profile (id, full_name, profile_text, {cols}) VALUES (1, ?, ?, {marks})"
+              f" ON CONFLICT (id) DO UPDATE SET full_name=excluded.full_name, profile_text=excluded.profile_text, {upd}",
+              (name, text, *details))
     c.commit()
     return jsonify(_profile_row(c))
 
@@ -199,11 +211,12 @@ def create_draft(email_id):
         if prof and prof["resume_data"]:
             attachment = (prof["resume_filename"], prof["resume_mime"], bytes(prof["resume_data"]))
     try:
+        new_thread = bool(d.get("new_thread"))  # e.g. applying to an address found in a job post
         raw = mailbuild.build_raw(to, str(d.get("subject", "")) or "Re: " + row["subject"], body,
-                                  row["message_id"], attachment)
+                                  "" if new_thread else row["message_id"], attachment)
         refresh = current_app.extensions["jobmail_cipher"].decrypt(acct["refresh_token_enc"])
         client = current_app.extensions["gmail_factory"](cfg, refresh)
-        result = client.create_draft(raw, row["thread_id"] or None)
+        result = client.create_draft(raw, None if new_thread else (row["thread_id"] or None))
     except ValueError:
         return jsonify(error="invalid_input"), 400
     except requests.HTTPError as exc:
@@ -211,6 +224,8 @@ def create_draft(email_id):
         return (jsonify(error="reauth_scope"), 403) if status in (401, 403) else (jsonify(error="gmail_error"), 502)
     except requests.RequestException:
         return jsonify(error="gmail_unreachable"), 502
+    c.execute("UPDATE emails SET replied_at=? WHERE id=?", (now_iso(), email_id))
+    c.commit()
     msg_id = (result.get("message") or {}).get("id", "")
     url = f"https://mail.google.com/mail/u/0/#drafts?compose={msg_id}" if msg_id else "https://mail.google.com/mail/u/0/#drafts"
     return jsonify(draft_id=result.get("id", ""), url=url, attached=bool(attachment))

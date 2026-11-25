@@ -66,12 +66,13 @@
         <div class="ws-group" data-ws="job">
           <button id="addBtn" class="compose-btn"><span data-icon="plus"></span><span class="nl">Add application</span></button>
           <div id="sidebarNav" class="nav">
-            <button class="nav-item" data-view="dashboard"><span data-icon="dashboard"></span><span class="nl">Dashboard</span></button>
+            <button class="nav-item" data-view="actions"><span data-icon="reply"></span><span class="nl">Needs action</span><span class="count" id="cActions"></span></button>
             <button class="nav-item" data-view="inbox"><span data-icon="inbox"></span><span class="nl">Inbox</span><span class="count" id="cInbox"></span></button>
             <button class="nav-item" data-view="unread"><span data-icon="mail"></span><span class="nl">Unread</span><span class="count" id="cUnread"></span></button>
             <button class="nav-item" data-view="matches"><span data-icon="star"></span><span class="nl">Best matches</span><span class="count" id="cMatches"></span></button>
             <button class="nav-item" data-view="board"><span data-icon="board"></span><span class="nl">Board</span><span class="count" id="cBoard"></span></button>
             <button class="nav-item" data-view="list"><span data-icon="list"></span><span class="nl">Applications</span></button>
+            <button class="nav-item" data-view="dashboard"><span data-icon="dashboard"></span><span class="nl">Overview</span></button>
           </div>
           <div class="nav-title">Labels</div>
           <div id="labelNav" class="nav"></div>
@@ -119,6 +120,16 @@
               <span data-icon="alert"></span>
               <div class="banner-text"><b>AI isn't working yet.</b> <span id="aiBannerText"></span></div>
               <button id="aiBannerBtn" class="btn small">Check AI connection</button>
+            </div>
+
+            <!-- Needs action -->
+            <div id="actionsView" class="view hidden">
+              <div class="list-toolbar">
+                <h2 class="view-title">Needs action</h2>
+                <span id="actionsCount" class="muted"></span>
+              </div>
+              <p class="muted">Interviews, assessments, offers and recruiter messages you have not replied to yet. Open one to see the key details, how it fits your resume, and ready-made replies.</p>
+              <div id="actionsList" class="match-list"></div>
             </div>
 
             <!-- Dashboard -->
@@ -229,6 +240,21 @@
                 </div>
               </section>
               <section class="panel">
+                <h3>Reply details</h3>
+                <p class="muted">Used to prefill replies and applications. Anything left empty shows up as a [placeholder] in the message so you can fill it in before sending.</p>
+                <div class="form-grid">
+                  <label>Phone <input id="pPhone" maxlength="120" autocomplete="tel"></label>
+                  <label>Contact email <input id="pContact" maxlength="120" autocomplete="email"></label>
+                  <label>LinkedIn <input id="pLinkedin" maxlength="120" placeholder="linkedin.com/in/…"></label>
+                  <label>Total experience <input id="pExp" maxlength="120" placeholder="9+ years"></label>
+                  <label>Current location <input id="pLoc" maxlength="120" placeholder="Chennai"></label>
+                  <label>Notice period <input id="pNotice" maxlength="120" placeholder="30 days"></label>
+                  <label>Current CTC <input id="pCurCtc" maxlength="120"></label>
+                  <label>Expected CTC <input id="pExpCtc" maxlength="120"></label>
+                </div>
+                <p class="muted small">Saved with the Save button above.</p>
+              </section>
+              <section class="panel">
                 <h3>AI &amp; mailbox</h3>
                 <p id="aiStatus" class="muted"></p>
                 <div id="aiTestResult" class="test-result hidden"></div>
@@ -272,9 +298,10 @@
   </dialog>
 
   <dialog id="composeDlg">
-    <h3>Reply with AI</h3>
+    <h3 id="composeTitle">Reply</h3>
     <p id="composeStatus" class="muted">Writing a draft…</p>
     <div id="composeForm" class="hidden">
+      <label>Template <select id="cTemplate"></select></label>
       <label>To <input id="cTo" type="email"></label>
       <label>Subject <input id="cSubject" maxlength="200"></label>
       <label>Message <textarea id="cBody" rows="11" maxlength="6000"></textarea></label>
@@ -284,11 +311,11 @@
     </div>
     <p id="composeError" class="error hidden"></p>
     <div id="composeDone" class="hidden">
-      <p>Draft created in your Gmail. Review it there and press send.</p>
+      <p id="composeDoneText">Draft created in your Gmail. Review it there and press send.</p>
       <a id="composeLink" class="btn primary" target="_blank" rel="noopener noreferrer">Open draft in Gmail</a>
     </div>
     <div class="row">
-      <button id="cRewrite" class="btn hidden">Rewrite</button>
+      <button id="cRewrite" class="btn hidden">Rewrite with AI</button>
       <span class="spacer"></span>
       <button id="cClose" class="btn">Close</button>
       <button id="cCreate" class="btn primary hidden">Create Gmail draft</button>
@@ -316,5 +343,6 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="/static/app.js"></script>
   <script src="/static/ws.js"></script>
+  <script src="/static/mail.js"></script>
 </body>
 </html>

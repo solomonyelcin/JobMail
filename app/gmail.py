@@ -165,6 +165,6 @@ def parse_message(msg):
         "labels": list(msg.get("labelIds") or []),
         "message_id": headers.get("message-id", "")[:300],
         "reply_to": headers.get("reply-to", "")[:300],
-        "body_text": re.sub(r"\n{3,}", "\n\n", text).strip()[:4000],
+        "body_text": re.sub(r"\n{3,}", "\n\n", text).strip()[:12000],
         "received_at": received.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
