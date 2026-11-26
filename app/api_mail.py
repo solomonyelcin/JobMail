@@ -1,11 +1,12 @@
 """Working with one job email: details, resume match, ready-made replies, and what needs action."""
+import html as htmllib
 import json
 import re
 
 import requests
-from flask import current_app, jsonify, request
+from flask import Response, current_app, jsonify, request, session
 
-from . import ai, jobinfo, matchlocal, templates
+from . import ai, htmlview, jobinfo, matchlocal, templates
 from .api import bp, cfg, conn, login_required
 from .api_extra import DETAIL_FIELDS
 from .sync import now_iso
@@ -15,7 +16,10 @@ ACTION_CATEGORIES = ("interview", "assessment", "offer", "recruiter")
 
 
 def _email(c, email_id):
-    return c.one("SELECT * FROM emails WHERE id=?", (email_id,))
+    row = c.one("SELECT * FROM emails WHERE id=?", (email_id,))
+    if row and row.get("body_text"):
+        row["body_text"] = htmllib.unescape(row["body_text"]).replace("\xa0", " ")  # older rows kept &#x27; etc.
+    return row
 
 
 def _profile(c):
@@ -146,3 +150,39 @@ def action_rows(c, limit=100):
 def actions():
     rows = action_rows(conn())
     return jsonify(items=rows, total=len(rows))
+
+
+def _page(doc, status, allow_remote):
+    resp = Response(doc, status=status, mimetype="text/html")
+    resp.headers["Content-Security-Policy"] = htmlview.csp(allow_remote)
+    resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+    resp.headers["Cache-Control"] = "private, max-age=120"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
+
+
+@bp.get("/api/emails/<int:email_id>/view")
+@login_required
+def email_view(email_id):
+    """The email as Gmail shows it: original HTML, fonts, colours and inline images, in a safe standalone page.
+    The app loads this inside a sandboxed iframe. ?images=0 holds back images hosted on other websites."""
+    allow_remote = request.args.get("images", "1") != "0"
+    c = conn()
+    row = c.one("SELECT gmail_id FROM emails WHERE id=?", (email_id,))
+    if not row:
+        return _page(htmlview.error_page("This email is no longer in SmartMail."), 404, False)
+    acct = c.one("SELECT * FROM accounts WHERE email=?", (session["email"],))
+    if not acct:
+        return _page(htmlview.error_page("Reconnect your Google account to see the original."), 403, False)
+    try:
+        refresh = current_app.extensions["jobmail_cipher"].decrypt(acct["refresh_token_enc"])
+        client = current_app.extensions["gmail_factory"](cfg, refresh)
+        original = client.get_original(row["gmail_id"])
+    except requests.HTTPError as exc:
+        gone = exc.response is not None and exc.response.status_code == 404
+        current_app.logger.warning("email view failed: status=%s", getattr(exc.response, "status_code", "?"))
+        return _page(htmlview.error_page("This email was deleted in Gmail." if gone else "Gmail could not be reached."), 404 if gone else 502, False)
+    except Exception:
+        current_app.logger.exception("email view failed")
+        return _page(htmlview.error_page("Could not load the original email."), 502, False)
+    return _page(htmlview.render(original, allow_remote), 200, allow_remote)

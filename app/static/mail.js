@@ -200,3 +200,72 @@ function actionCard(m) {
   actions.append(open, done); body.append(actions); card.append(body);
   return card;
 }
+
+// ---------- the email itself, as Gmail shows it ----------
+// HTML entities left in older plain-text rows (&#x27; &nbsp;) are decoded with an inert parser, never innerHTML.
+function decodeEntities(t) {
+  if (!/&[#\w]+;/.test(t)) return t;
+  return (new DOMParser().parseFromString(t, "text/html").documentElement.textContent || "").replace(/\u00a0/g, " ");
+}
+function buildMailViewer(e) {
+  const wrap = el("div", "mail-viewer");
+  const bar = el("div", "viewer-bar");
+  const seg = el("div", "seg"); seg.setAttribute("role", "tablist");
+  const bOrig = el("button", "", "Original"), bText = el("button", "", "Text");
+  [bOrig, bText].forEach((b) => { b.type = "button"; b.setAttribute("role", "tab"); });
+  seg.append(bOrig, bText);
+  const imgs = el("button", "link small"); imgs.type = "button";
+  const gm = el("a", "link small ext", "Open in Gmail"); gm.href = `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(e.gmail_id || "")}`;
+  gm.target = "_blank"; gm.rel = "noopener noreferrer";
+  const note = el("span", "muted small");
+  bar.append(seg, imgs, note); if (e.gmail_id) bar.append(gm);
+  const stage = el("div", "viewer-stage");
+  wrap.append(bar, stage);
+
+  const state = { mode: store("jm-view") === "text" ? "text" : "original", images: store("jm-images") !== "0", ro: null };
+  const showText = (why) => {
+    state.mode = "text"; seg.classList.toggle("text", true); bOrig.classList.remove("on"); bText.classList.add("on");
+    imgs.classList.add("hidden"); note.textContent = why || "";
+    stage.replaceChildren(); const mb = el("div", "mail-body"); linkify(mb, decodeEntities(e.body_text || e.snippet || "(no text)")); stage.append(mb);
+  };
+  const showOriginal = () => {
+    state.mode = "original"; bText.classList.remove("on"); bOrig.classList.add("on");
+    imgs.classList.remove("hidden"); imgs.textContent = state.images ? "Hide images" : "Show images"; note.textContent = "";
+    const frame = el("iframe", "mail-frame");
+    frame.title = "Email: " + (e.subject || "");
+    // no allow-scripts: nothing inside the email can run code. allow-same-origin only lets this page size the frame.
+    frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.src = `/api/emails/${e.id}/view?images=${state.images ? 1 : 0}`;
+    frame.style.height = "240px";
+    let fitting = false;
+    const fit = () => {
+      if (fitting) return; fitting = true;
+      try {
+        const d = frame.contentDocument; if (!d || !d.body || !d.documentElement) return;
+        // like Gmail on a phone: a fixed-width newsletter is scaled down to fit instead of scrolling sideways
+        d.body.style.zoom = "";
+        const natural = d.documentElement.scrollWidth, avail = frame.clientWidth;
+        if (natural > avail + 1 && avail > 0) d.body.style.zoom = String(Math.max(0.3, avail / natural));
+        frame.style.height = Math.max(120, d.documentElement.scrollHeight + 2) + "px";
+      } catch (_) { /* cross-origin: keep fixed height */ } finally { fitting = false; }
+    };
+    window.addEventListener("resize", fit);
+    frame.addEventListener("load", () => {
+      let d = null; try { d = frame.contentDocument; } catch (_) { /* ignore */ }
+      if (!d) return;
+      if (d.querySelector('meta[name="jm-error"]')) { showText("The original could not be loaded, so this is the text version."); return; }
+      fit();
+      const held = Number((d.querySelector('meta[name="jm-remote"]') || {}).content || 0);
+      note.textContent = held && !state.images ? `${held} image${held === 1 ? "" : "s"} hidden` : "";
+      if (window.ResizeObserver && d.body) { if (state.ro) state.ro.disconnect(); state.ro = new ResizeObserver(fit); state.ro.observe(d.body); }
+      d.querySelectorAll("img").forEach((i) => i.addEventListener("load", fit));
+    });
+    stage.replaceChildren(frame);
+  };
+  bOrig.addEventListener("click", () => { store("jm-view", "original"); showOriginal(); });
+  bText.addEventListener("click", () => { store("jm-view", "text"); showText(); });
+  imgs.addEventListener("click", () => { state.images = !state.images; store("jm-images", state.images ? "1" : "0"); showOriginal(); });
+  if (state.mode === "text") showText(); else showOriginal();
+  return wrap;
+}

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
-JUNK_LOCAL = re.compile(r"(?i)^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|bounce|notifications?|alerts?|unsubscribe)")
+JUNK_LOCAL = re.compile(r"(?i)^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|bounce|notifications?|alerts?|unsubscribe|support|help(?:desk)?|info|contact(?:us)?|feedback|privacy|abuse|legal|billing|sales|care|customer)(?![a-z])")
 APPLY_HINT = re.compile(
     r"(?i)(send|share|forward|email|mail|submit|drop|attach)[^.\n]{0,60}?(resume|cv|profile|application|updated)")
 CONTACT_HINT = re.compile(r"(?i)(contact|reach|write to|apply (at|to|via|through)|interested)[^.\n]{0,40}")
@@ -62,7 +62,8 @@ def find_apply_addresses(text, sender_email="", limit=4):
             score -= 1
         found.append((addr, score))
     found.sort(key=lambda x: -x[1])
-    return [a for a, s in found[:limit]]
+    # a plain "contact us" footer address is not somewhere to send an application: it needs a real signal
+    return [a for a, s in found if s >= 2][:limit]
 
 
 def _parse_date(m, today):

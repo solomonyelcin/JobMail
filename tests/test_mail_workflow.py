@@ -172,3 +172,9 @@ def test_ai_match_is_cached_and_needs_ai(app, auth_client, monkeypatch):
     auth_client.post(f"/api/emails/{eid}/match", json={"refresh": True})
     assert len(calls) == 2
     assert auth_client.get(f"/api/emails/{eid}/details").get_json()["ai_match"]["verdict"] == "Good fit"
+
+
+def test_footer_support_address_is_not_an_apply_address():
+    footer = "Voila! Your professional assistant. Questions or help? Contact us at support@cutshort.io. Unsubscribe."
+    assert jobinfo.find_apply_addresses(footer) == []
+    assert jobinfo.find_apply_addresses("Please share your resume at hr@acme.com") == ["hr@acme.com"]

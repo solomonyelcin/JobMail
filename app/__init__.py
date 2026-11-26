@@ -56,12 +56,13 @@ def create_app(overrides=None):
     @app.after_request
     def security_headers(resp):
         resp.headers["X-Content-Type-Options"] = "nosniff"
-        resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "same-origin"
-        resp.headers["Content-Security-Policy"] = (
+        # the email viewer sets its own, stricter policy (and may be framed by this app); everything else gets these
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Content-Security-Policy", (
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
-            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        )
+            "frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        ))
         if app.config["SESSION_COOKIE_SECURE"]:
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         if resp.mimetype == "application/json":
