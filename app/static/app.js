@@ -579,9 +579,7 @@ function renderEmailPane(e) {
     box.append(ic("sparkle"), txt); body.append(box);
   }
   const top = el("div", "mail-extras"), rest = el("div", "mail-extras");
-  body.append(top);
-  const mb = el("div", "mail-body"); linkify(mb, e.body_text || e.snippet || "(no text)"); body.append(mb);
-  body.append(rest);
+  body.append(buildMailViewer(e), top, rest);  // the mail first, like Gmail; reply tools and analysis below it
   pane.append(bar, body);
   renderMailExtras(e, top, rest);
 }

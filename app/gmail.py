@@ -1,5 +1,6 @@
 """Minimal Gmail / Google OAuth client using plain HTTPS (no Google SDK needed)."""
 import base64
+from html import unescape
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -113,6 +114,31 @@ class GmailClient:
         r.raise_for_status()
         return parse_message(r.json())
 
+    def get_attachment(self, msg_id, attachment_id):
+        r = self.s.get(f"{GMAIL_API}/messages/{msg_id}/attachments/{attachment_id}", headers=self.h, timeout=TIMEOUT)
+        r.raise_for_status()
+        data = r.json().get("data", "")
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+    def get_original(self, msg_id):
+        """The message as sent: {"html", "text", "inline": {content-id: (mime, bytes)}}.
+        Inline images are fetched so the viewer can show them without any outside request."""
+        r = self.s.get(f"{GMAIL_API}/messages/{msg_id}", headers=self.h, params={"format": "full"}, timeout=TIMEOUT)
+        r.raise_for_status()
+        payload = r.json().get("payload", {})
+        out, parts = {}, []
+        _walk(payload, out)
+        _inline_parts(payload, parts)
+        inline = {}
+        for cid, mime, data, att_id in parts[:MAX_INLINE_IMAGES]:
+            try:
+                raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)) if data else self.get_attachment(msg_id, att_id)
+            except (requests.RequestException, ValueError):
+                continue
+            if len(raw) <= MAX_INLINE_BYTES:
+                inline[cid] = (mime, raw)
+        return {"html": "\n".join(out.get("text/html", [])), "text": "\n".join(out.get("text/plain", [])), "inline": inline}
+
     def get_messages(self, ids, workers=8):
         """Fetch many messages in parallel. Returns {id: message or None (if deleted)}."""
         def one(mid):
@@ -140,10 +166,30 @@ def _walk(part, out):
         _walk(p, out)
 
 
+MAX_INLINE_IMAGES = 25
+MAX_INLINE_BYTES = 3_000_000
+
+
+def _inline_parts(part, out):
+    """Image parts that the HTML can point at with cid: links -> (content-id, mime, inline data, attachment id)."""
+    mime = part.get("mimeType", "")
+    hdrs = {h["name"].lower(): h["value"] for h in part.get("headers", []) or []}
+    cid = hdrs.get("content-id", "").strip().strip("<>").strip()
+    body = part.get("body", {}) or {}
+    if cid and mime.startswith("image/") and (body.get("data") or body.get("attachmentId")):
+        out.append((cid, mime, body.get("data", ""), body.get("attachmentId", "")))
+    for p in part.get("parts", []) or []:
+        _inline_parts(p, out)
+
+
 def _html_to_text(html):
-    html = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
+    """Readable plain text from HTML: line breaks kept at block tags, entities decoded."""
+    html = re.sub(r"(?is)<(script|style|head|title).*?>.*?</\1>", " ", html)
+    html = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h[1-6]|table|blockquote)>", "\n", html)
     html = re.sub(r"(?s)<[^>]+>", " ", html)
-    return re.sub(r"\s+", " ", html).strip()
+    html = unescape(html).replace("\xa0", " ")
+    html = re.sub(r"[ \t\r\f\v]+", " ", html)
+    return re.sub(r"\n[ \n]*", "\n", html).strip()
 
 
 def parse_message(msg):

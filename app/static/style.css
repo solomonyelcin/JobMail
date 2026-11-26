@@ -600,3 +600,13 @@ a.ext { color: var(--brand); text-decoration: underline; text-underline-offset: 
 .match.action.unread { border-left: 4px solid var(--brand); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
 @media (max-width: 560px) { .kv { grid-template-columns: 1fr; gap: 0; } }
+
+/* ---------- original email viewer ---------- */
+.mail-viewer { display: grid; gap: 8px; }
+.viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--surface2); }
+.seg button { border: 0; background: none; color: var(--ink); padding: 4px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+.seg button.on { background: var(--brand); color: #fff; }
+.viewer-bar .link { background: none; border: 0; color: var(--brand); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.viewer-stage { min-width: 0; }
+.mail-frame { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #fff; display: block; color-scheme: light; }

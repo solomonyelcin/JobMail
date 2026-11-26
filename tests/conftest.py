@@ -20,6 +20,10 @@ class FakeGmail:
     def list_unread_ids(self, days, max_total=1000):
         return list(helpers.STATE["unread"])
 
+    def get_original(self, mid):
+        m = self.get_message(mid)
+        return {"html": m.get("html", ""), "text": m.get("body_text", ""), "inline": m.get("inline", {})}
+
     def create_draft(self, raw, thread_id=None):
         helpers.STATE["drafts"].append((raw, thread_id))
         return {"id": "d1", "message": {"id": "mm1", "threadId": thread_id}}
